@@ -12,6 +12,8 @@ python3 -m http.server 5173
 
 Open [localhost:5173](http://localhost:5173). Serve the files over HTTP; opening `index.html` directly will not load JavaScript modules correctly.
 
+Dark mode is the default. Phone navigation stays within thumb reach, study cards flip on tap, and large confidence buttons keep sessions quick. Each card reviewed earns 10 XP, with levels every 500 XP and a daily quest based on your study goal. Rewards depend on practice, so ratings can stay honest.
+
 The guest library starts with example decks. Create a class and deck, or use **Import cards** to upload CSV, TSV, TXT, or JSON (up to 5 MB), paste spreadsheet rows, or paste `Q:` / `A:` blocks. Choose a delimiter manually if detection reports an ambiguous file. The preview shows parsed cards before importing; duplicates already in the target deck are not added again. Sample files are in `samples/`.
 
 Study sessions prioritize due cards and unseen cards. Reveal an answer and rate your confidence from 1 to 5; weak cards return sooner. Study progress is saved after each rating. In Settings, you can set your daily goal, add the example classes, export a full JSON backup, or restore a backup. Individual decks can be exported as CSV.
