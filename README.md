@@ -14,6 +14,8 @@ Open [localhost:5173](http://localhost:5173). Serve the files over HTTP; opening
 
 Dark mode is the default. Phone navigation stays within thumb reach, study cards flip on tap, and large confidence buttons keep sessions quick. Each card reviewed earns 10 XP, with levels every 500 XP and a daily quest based on your study goal. Rewards depend on practice, so ratings can stay honest.
 
+The Progress screen shows total reviews, study time, active days, strong cards, a 14-day activity chart, 12-week calendar, confidence distribution, and cards due or ready to learn. These statistics are calculated from the activity and card progress already saved with your library, including in your private account.
+
 The guest library starts with example decks. Create a class and deck, or use **Import cards** to upload CSV, TSV, TXT, or JSON (up to 5 MB), paste spreadsheet rows, or paste `Q:` / `A:` blocks. Choose a delimiter manually if detection reports an ambiguous file. The preview shows parsed cards before importing; duplicates already in the target deck are not added again. Sample files are in `samples/`.
 
 Study sessions prioritize due cards and unseen cards. Reveal an answer and rate your confidence from 1 to 5; weak cards return sooner. Study progress is saved after each rating. In Settings, you can set your daily goal, add the example classes, export a full JSON backup, or restore a backup. Individual decks can be exported as CSV.
@@ -36,7 +38,7 @@ npm test
 
 No `npm install` is needed. An additional browser-native check page is available at [localhost:5173/tests/run.html](http://localhost:5173/tests/run.html) while the local server is running. The GitHub deployment workflow checks JavaScript syntax and runs the automated tests before publishing.
 
-The app entry point is `src/app.js`, data validation and examples are in `src/data.js`, import/export handling is in `src/importer.js`, and spaced repetition is in `src/study.js`. The cloud adapter is `src/cloud.js`; all presentation styles are in `styles.css`. Install metadata lives in `manifest.webmanifest`; `sw.js` provides the offline public shell. To regenerate the PNG icons from the existing flower geometry, run `python3 scripts/generate_icons.py` (no extra packages required).
+The app entry point is `src/app.js`, data validation and examples are in `src/data.js`, import/export handling is in `src/importer.js`, spaced repetition is in `src/study.js`, and dashboard calculations are in `src/stats.js`. The cloud adapter is `src/cloud.js`; all presentation styles are in `styles.css`. Install metadata lives in `manifest.webmanifest`; `sw.js` provides the offline public shell. To regenerate the PNG icons from the existing flower geometry, run `python3 scripts/generate_icons.py` (no extra packages required).
 
 ## Accounts and private storage
 
