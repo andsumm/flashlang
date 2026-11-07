@@ -48,11 +48,14 @@ function persist() {
 function queueCloudSave() {
   clearTimeout(cloudTimer);
   if (!state.user || !state.cloudReady) return syncChain;
-  const id=state.user.id, snapshot=structuredClone(state.library), generation=++syncGeneration, revision=state.revision;
-  syncChain=syncChain.catch(()=>{}).then(()=>saveCloudLibrary(id,snapshot)).then(()=>{
-    if(state.user?.id===id&&generation===syncGeneration&&state.revision===revision){state.dirty=false;state.sync='synced';writeLocal();updateStatus();}
+  const id=state.user.id, snapshot=structuredClone(state.library), generation=++syncGeneration, revision=state.revision, authEpoch=authGeneration;
+  syncChain=syncChain.catch(()=>{}).then(()=>{
+    if(authEpoch!==authGeneration||state.user?.id!==id)return;
+    return saveCloudLibrary(id,snapshot);
+  }).then(()=>{
+    if(authEpoch===authGeneration&&state.user?.id===id&&generation===syncGeneration&&state.revision===revision){state.dirty=false;state.sync='synced';writeLocal();updateStatus();}
   }).catch(error=>{
-    if(state.user?.id===id){state.sync='error';updateStatus();toast('Cloud sync failed. Your cards are saved on this device. Retry in Settings.',true);}
+    if(authEpoch===authGeneration&&state.user?.id===id){state.sync='error';updateStatus();toast('Cloud sync failed. Your cards are saved on this device. Retry in Settings.',true);}
     console.error('Cloud save failed:',error.message);
   });
   return syncChain;
