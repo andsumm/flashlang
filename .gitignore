@@ -1,0 +1,11 @@
+.DS_Store
+_site/
+node_modules/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+test-results/
+playwright-report/
+screenshots/

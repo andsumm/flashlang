@@ -1,0 +1,12 @@
+{
+  "name": "flashlang",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A calm, confidence-based flashcard app. Static hosting, private Supabase accounts, no build dependencies.",
+  "scripts": {
+    "dev": "python3 -m http.server 5173 --bind 127.0.0.1",
+    "build": "python3 scripts/build.py",
+    "test": "node --test tests/*.test.js"
+  }
+}

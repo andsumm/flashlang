@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Flashcard logic tests</title>
+<style>body{font:16px/1.6 system-ui;margin:3rem;max-width:70rem}pre{white-space:pre-wrap}.pass{color:#128353}.fail{color:#b52d30}</style>
+<h1>Flashcard logic tests</h1>
+<pre id="results">Running…</pre>
+<script type="module">
+import { parseImport, toCsv } from '../src/importer.js';
+import { dateKey, getMastery, getStreak, scheduleReview, selectStudyCards } from '../src/study.js';
+const output = document.querySelector('#results');
+const lines = [];
+let failures = 0;
+const equal = (actual, expected) => { if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`Expected ${JSON.stringify(expected)}; got ${JSON.stringify(actual)}`); };
+const throws = fn => { let failed = false; try { fn(); } catch { failed = true; } if (!failed) throw new Error('Expected an error'); };
+function test(name, run) { try { run(); lines.push(`PASS ${name}`); } catch (error) { failures++; lines.push(`FAIL ${name}: ${error.message}`); } }
+test('Quoted multiline CSV', () => equal(parseImport('\uFEFFquestion,answer\r\n"A, B","one ""quote""\nsecond line"').cards, [{question:'A, B',answer:'one "quote"\nsecond line'}]));
+test('TSV detection', () => equal(parseImport('Hello\tCiao').format, 'tsv'));
+test('TSV answer may contain a comma', () => equal(parseImport('Hello\tCiao, or goodbye').cards, [{question:'Hello',answer:'Ciao, or goodbye'}]));
+test('Ambiguous separator is rejected', () => throws(() => parseImport('Question|Answer, with comma')));
+test('Semicolon detection', () => equal(parseImport('Hello;Ciao').format, 'semicolon'));
+test('Pipe detection', () => equal(parseImport('Hello|Ciao').format, 'pipe'));
+test('Header mapping', () => equal(parseImport('id,back,front\n1,Answer,Question').cards, [{question:'Question',answer:'Answer'}]));
+test('JSON aliases', () => equal(parseImport('{"cards":[{"front":"Q","back":"A"}]}').cards, [{question:'Q',answer:'A'}]));
+test('Q/A blocks', () => equal(parseImport('Q: Question\nA: Answer\n\nQ: More\nA: Another').cards.length, 2));
+test('Q: prefixes in TSV', () => equal(parseImport('Q: Hello\tA: Ciao').cards[0].answer, 'A: Ciao'));
+test('Blank side rejected', () => throws(() => parseImport('question,answer\nHello,')));
+test('Unclosed quote rejected', () => throws(() => parseImport('"Hello,Ciao', 'csv')));
+test('Overlong field rejected', () => throws(() => parseImport('a'.repeat(20001) + ',b')));
+test('Too many cards rejected', () => throws(() => parseImport(Array.from({length:10001}, () => 'a,b').join('\n'))));
+test('CSV roundtrip', () => { const cards = [{question:'Caffè, "please"?', answer:'日本語\nNext line'}]; equal(parseImport(toCsv(cards)).cards, cards); });
+test('Duplicate warning', () => equal(parseImport('a,b\na,b').warnings.length, 1));
+const now = new Date('2026-11-07T12:00:00Z');
+test('Low confidence one-minute review', () => equal(scheduleReview({reviewCount:0,confidence:0}, 1, now).dueAt, '2026-11-07T12:01:00.000Z'));
+test('High confidence seven-day review', () => equal(scheduleReview({reviewCount:0,confidence:0}, 5, now).dueAt, '2026-11-14T12:00:00.000Z'));
+test('Year interval cap', () => equal(Date.parse(scheduleReview({reviewCount:100,confidence:5}, 5, now).dueAt) - now.getTime(), 365*86400000));
+test('Smart queue', () => equal(selectStudyCards([{id:'future',reviewCount:1,confidence:5,dueAt:'2027-01-01'}, {id:'new',confidence:0}, {id:'due',reviewCount:1,confidence:1,dueAt:'2026-01-01'}], {now}).map(c=>c.id), ['due','new']));
+test('Mastery includes unseen cards', () => equal(getMastery([{confidence:5},{confidence:0}]),50));
+test('Local date key', () => equal(dateKey(new Date(2026,10,7,12)),'2026-11-07'));
+test('Yesterday maintains streak', () => equal(getStreak([{date:'2026-11-06',cards:1},{date:'2026-11-05',cards:2}],new Date(2026,10,7,12)),2));
+lines.push(`\n${lines.length - failures} passed; ${failures} failed.`);
+output.textContent = lines.join('\n');
+output.className = failures ? 'fail' : 'pass';
+document.documentElement.dataset.testStatus = failures ? 'failed' : 'passed';
+window.testResults = { passed: lines.length - 1 - failures, failed: failures };
+</script>
+</html>

@@ -1,0 +1,28 @@
+{
+  "id": "./",
+  "name": "Flashlang",
+  "short_name": "Flashlang",
+  "description": "Learn a little every day with flashcards, confidence-based study, and your own private library.",
+  "lang": "en",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8f9fb",
+  "theme_color": "#202b3c",
+  "categories": ["education", "productivity"],
+  "icons": [
+    {
+      "src": "./assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "prefer_related_applications": false
+}
