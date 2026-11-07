@@ -2,14 +2,17 @@
   "id": "./",
   "name": "Flashlang",
   "short_name": "Flashlang",
-  "description": "Learn a little every day with flashcards, confidence-based study, and your own private library.",
+  "description": "A dark, mobile-first flashcard study game. Build a daily streak, earn XP, and make knowledge stick.",
   "lang": "en",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#f8f9fb",
-  "theme_color": "#202b3c",
-  "categories": ["education", "productivity"],
+  "background_color": "#151d2b",
+  "theme_color": "#172131",
+  "categories": [
+    "education",
+    "games"
+  ],
   "icons": [
     {
       "src": "./assets/icon-192.png",
