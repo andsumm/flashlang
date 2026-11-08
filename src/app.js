@@ -529,7 +529,11 @@ function helpModal() {
 function startStudy(scope='all',id=null) {
   if(state.cloudLoading||state.cloudError)return toast('Let your library finish loading first.',true);
   const pool=[];
-  const classes=scope==='all'?state.library.classes:[currentClass()].filter(Boolean);
+  const availableClasses=[...state.library.classes,...publicClasses()];
+  const classes=scope==='all'?state.library.classes
+    :scope==='class'?availableClasses.filter(cls=>cls.id===(id||state.classId))
+    :scope==='deck'?availableClasses.filter(cls=>cls.decks.some(deck=>deck.id===id))
+    :[currentClass()].filter(Boolean);
   for(const cls of classes){if(scope==='class'&&cls.id!==(id||state.classId))continue;for(const deck of cls.decks){if(scope==='deck'&&deck.id!==id)continue;for(const card of deck.cards)pool.push({cls,deck,card});}}
   if(!pool.length)return toast('Add a few cards first. A little knowledge starts somewhere.');
   const selected=selectStudyCards(pool.map(p=>p.card),{limit:20});
