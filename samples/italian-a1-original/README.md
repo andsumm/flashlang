@@ -6,6 +6,6 @@ The public listing observed on 2026-11-08 was **Italian - Beginner (A1)**, with 
 
 ## In Flashlang
 
-The course is included in Flashlang's default example collection as one class with 13 lecture decks. New guest libraries get it automatically. Existing guest libraries can add it with **Settings → Add examples**; signed-in libraries stay private and are not changed automatically.
+The course is included in Flashlang's default example collection as one class with 13 topic decks and 14 original English verb-practice decks. Each verb deck has 80 cards covering the Italian meaning, past simple, past participle, -ing form, and he/she/it form. New guest libraries get the expanded course automatically. Existing guest libraries can add it with **Settings → Add examples**; signed-in libraries stay private and are not changed automatically.
 
 To import the CSVs manually, add each lecture file to the same class and use the lecture title as its deck name. The files are numbered in study order. There are no repeated Italian prompts within the course.

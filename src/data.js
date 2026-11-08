@@ -1,6 +1,15 @@
+import { englishVerbDecks } from './english-course.js';
+
 export const newId = () => crypto.randomUUID();
 export const newCard = (question, answer) => ({id:newId(), question, answer, confidence:0, dueAt:null, reviewedAt:null, reviewCount:0, starred:false});
 const makeDeck = (title, pairs) => ({id:newId(),title,createdAt:new Date().toISOString(),cards:pairs.map(([q,a])=>newCard(q,a))});
+const makeVerbDeck = ({title,verbs}) => makeDeck(title,verbs.flatMap(([italian,base,past,participle,ing,thirdPerson])=>[
+  [`Come si dice “${italian}” in inglese?`,`to ${base}`],
+  [`Qual è il past simple di “${base}”?`,past],
+  [`Qual è il past participle di “${base}”?`,participle],
+  [`Qual è la forma in -ing di “${base}”?`,ing],
+  [`Qual è la forma he/she/it di “${base}”?`,thirdPerson]
+]));
 export const emptyLibrary = () => ({version:1,classes:[],activity:[],settings:{dailyGoal:20,language:'en'}});
 export function exampleLibrary() {
   const library = emptyLibrary();
@@ -28,7 +37,8 @@ export function exampleLibrary() {
         makeDeck('B1 — 10 Time', [['Che ore sono?','What time is it?'],["È l'una.",'It is one o’clock.'],['Sono le tre e un quarto.','It is quarter past three.'],['Sono le sei meno dieci.','It is ten to six.'],['a mezzogiorno','at noon'],['a mezzanotte','at midnight'],['per due ore','for two hours'],['tra cinque minuti','in five minutes'],['in questo momento','right now'],['in anticipo','ahead of time']]),
         makeDeck('B2 — 11 Food and drink', [['Vorrei un tavolo per due.','I would like a table for two.'],['il menù del giorno','the menu of the day'],["un'acqua frizzante",'a sparkling water'],['senza formaggio','without cheese'],['Sono vegetariano / vegetariana.','I am vegetarian. (masculine / feminine)'],['un piatto di pasta','a plate of pasta'],['È molto piccante?','Is it very spicy?'],['Posso assaggiare?','May I try a taste?'],['un gelato alla fragola','a strawberry ice cream'],['Buon appetito!','Enjoy your meal!']]),
         makeDeck('B2 — 12 Getting around', [["Dov'è la fermata dell'autobus?",'Where is the bus stop?'],['un biglietto di sola andata','a one-way ticket'],['Il treno parte alle nove.','The train leaves at nine.'],['Scenda alla prossima fermata.','Get off at the next stop. (formal command)'],['a nord della piazza','north of the square'],['Continui fino al ponte.','Continue as far as the bridge. (formal command)'],['È lontano da qui?','Is it far from here?'],['Ho perso la strada.',"I've lost my way."],["l'ingresso principale",'the main entrance'],['un taxi libero','an available taxi']]),
-        makeDeck('C1 — 13 Pronunciation tips', [['che / chi','The letters ch sound like k before e or i, as in che and chi.'],['ce / ci','The letter c sounds like English "ch" before e or i, as in cena and cinema.'],['ge / gi','The letter g sounds like English "j" before e or i, as in gelato and giro.'],['ghe / ghi','The h keeps g hard before e or i, as in spaghetti and laghi.'],['gli','In many words (for example famiglia), gli is a palatal sound with no exact English equivalent.'],['gn','In words such as gnocchi, gn sounds roughly like "ny" in canyon.'],['sci / sce','The letters sc sound like English "sh" before i or e, as in sciare and scena.'],['h in ho / hai','The h is silent; ho and hai sound like o and ai.'],['double consonants','Hold a double consonant slightly longer than a single one; it can distinguish word meanings.']])
+        makeDeck('C1 — 13 Pronunciation tips', [['che / chi','The letters ch sound like k before e or i, as in che and chi.'],['ce / ci','The letter c sounds like English "ch" before e or i, as in cena and cinema.'],['ge / gi','The letter g sounds like English "j" before e or i, as in gelato and giro.'],['ghe / ghi','The h keeps g hard before e or i, as in spaghetti and laghi.'],['gli','In many words (for example famiglia), gli is a palatal sound with no exact English equivalent.'],['gn','In words such as gnocchi, gn sounds roughly like "ny" in canyon.'],['sci / sce','The letters sc sound like English "sh" before i or e, as in sciare and scena.'],['h in ho / hai','The h is silent; ho and hai sound like o and ai.'],['double consonants','Hold a double consonant slightly longer than a single one; it can distinguish word meanings.']]),
+        ...englishVerbDecks.map(makeVerbDeck)
       ]
     },
     {
@@ -57,7 +67,10 @@ export function validateLibrary(value) {
   const uniqueId = value => { if (typeof value !== 'string' || !value || value.length>100 || ids.has(value)) throw new Error('The backup contains invalid or duplicate IDs.'); ids.add(value); return value; };
   const text = (value, max) => { if (typeof value !== 'string' || !value.trim() || value.length>max) throw new Error('The backup contains invalid text.'); return value; };
   const time = value => value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
-  const normalizeCourseTitle = value => value === 'Italian A1 — Italian to English' ? 'Inglese' : value;
+  const normalizeCourseTitle = value => {
+    if (value === 'Italian A1 — Italian to English' || value === 'Inglese (A1)') return 'Inglese';
+    return value;
+  };
   const normalizeDeckTitle = value => {
     const map = {
       '01 Greetings': 'A1 — 01 Greetings',

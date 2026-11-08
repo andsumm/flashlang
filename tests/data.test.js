@@ -189,13 +189,14 @@ test('empty libraries and newly created cards contain clean defaults', () => {
   assert.equal(card.reviewedAt, null);
 });
 
-test('default examples include one Inglese course with 13 unique-prompt lectures across A1–C1', () => {
+test('default examples include one expanded Inglese course with unique-prompt lectures across A1–C1', () => {
   const library = exampleLibrary();
   const course = library.classes.find(item => item.title === 'Inglese');
   assert.ok(course);
-  assert.equal(course.decks.length, 13);
+  assert.equal(course.decks.length, 27);
   assert.deepEqual(course.decks.map(deck => deck.title.slice(0, 2)), ['A1', 'A1', 'A1', 'A2', 'A2', 'A2', 'A2', 'B1', 'B1', 'B1', 'B2', 'B2', 'C1']);
+  assert.ok(course.decks.slice(13).every(deck => deck.cards.length === 80));
   const prompts = course.decks.flatMap(deck => deck.cards.map(card => card.question.toLocaleLowerCase('it')));
-  assert.equal(prompts.length, 114);
+  assert.equal(prompts.length, 1234);
   assert.equal(new Set(prompts).size, prompts.length);
 });
