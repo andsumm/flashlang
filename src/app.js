@@ -285,7 +285,9 @@ async function loadBrainscapePack() {
   try {
     const pack=await importBrainscapePack(url);
     if(!$('#import-text')||state.importDraft!==draft)return;
-    draft.text=JSON.stringify({cards:pack.cards},null,2);draft.format='json';
+    const text=JSON.stringify({cards:pack.cards},null,2);
+    if(text.length>5*1024*1024)throw new Error('This import is too large. Please keep it under 5 MB.');
+    draft.text=text;draft.format='json';
     draft.brainscapeTitle=pack.title;draft.brainscapeCount=pack.cards.length;draft.brainscapeLoaded=true;draft.brainscapeWarnings=pack.warnings;
     $('#import-text').value=draft.text;$('#import-format').value='json';
     if(!draft.append&&($('#import-deck-title').value===translateText('Imported cards',language())||!$('#import-deck-title').value.trim()))$('#import-deck-title').value=pack.title;
