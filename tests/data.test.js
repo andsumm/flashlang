@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateLibrary, emptyLibrary, exampleLibrary, newCard } from '../src/data.js';
+import { validateLibrary, emptyLibrary, exampleLibrary, newCard, normalizeClassIcon } from '../src/data.js';
 
 function backup() {
   return {
@@ -142,13 +142,23 @@ test('language course emoji icons are accepted in backups', () => {
   assert.deepEqual(restored.classes.map(cls => cls.icon), ['flags-en-it', 'flags-it-en']);
 });
 
-test('existing language courses migrate to source-to-target flag pairs', () => {
+test('language courses without a saved icon migrate to source-to-target flag pairs', () => {
   const library = backup();
   library.classes[0].title = 'Italian essentials';
   library.classes[1].title = 'Inglese';
-  library.classes[0].icon = 'flag-it';
-  library.classes[1].icon = 'flag-en';
+  delete library.classes[0].icon;
+  delete library.classes[1].icon;
   assert.deepEqual(validateLibrary(library).classes.map(cls => cls.icon), ['flags-en-it', 'flags-it-en']);
+});
+
+test('custom course icons are preserved even when course names match the examples', () => {
+  assert.equal(normalizeClassIcon('globe', 'Italian essentials'), 'globe');
+  assert.equal(normalizeClassIcon('book', 'Inglese'), 'book');
+  assert.equal(normalizeClassIcon('flag-it', 'Italian essentials'), 'flag-it');
+  assert.equal(normalizeClassIcon('flag-en', 'Inglese'), 'flag-en');
+  assert.equal(normalizeClassIcon('flags-en-it'), 'flags-en-it');
+  assert.equal(normalizeClassIcon('flags-it-en'), 'flags-it-en');
+  assert.equal(normalizeClassIcon('unknown'), 'book');
 });
 
 test('course visibility is limited to public or private and defaults to private', () => {

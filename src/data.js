@@ -3,8 +3,8 @@ import { englishVerbDecks } from './english-course.js';
 export const newId = () => crypto.randomUUID();
 export const newCard = (question, answer) => ({id:newId(), question, answer, confidence:0, dueAt:null, reviewedAt:null, reviewCount:0, starred:false});
 export const normalizeClassIcon = (icon,title) => {
-  if (title==='Italian essentials') return 'flags-en-it';
-  if (title==='Inglese') return 'flags-it-en';
+  if (!icon&&title==='Italian essentials') return 'flags-en-it';
+  if (!icon&&title==='Inglese') return 'flags-it-en';
   return ['globe','palette','book','bulb','leaf','folder','flag-it','flag-en','flags-en-it','flags-it-en'].includes(icon)?icon:'book';
 };
 const makeDeck = (title, pairs) => ({id:newId(),title:title.replace(/^([A-C][12] — )\d+ /,'$1'),createdAt:new Date().toISOString(),cards:pairs.map(([q,a])=>newCard(q,a))});
