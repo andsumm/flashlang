@@ -1,11 +1,11 @@
 import { icon } from './icons.js';
 import { exampleLibrary, emptyLibrary, newId, newCard, validateLibrary } from './data.js';
 import { parseImport, toCsv } from './importer.js';
-import { scheduleReview, selectStudyCards, getMastery, dateKey } from './study.js';
+import { scheduleReview, selectStudyCards, resolveStudyScope, getMastery, dateKey } from './study.js';
 import { getStudyStats } from './stats.js';
 import { localize, translateText } from './i18n.js';
 import { createSoundFeedback } from './sounds.js';
-import { isCloudConfigured, getCloudClient, getAuthRedirectUrl, loadCloudLibrary, saveCloudLibrary, importBrainscapePack } from './cloud.js';
+import { isCloudConfigured, getCloudClient, getAuthRedirectUrl, loadCloudLibrary, loadPublicCourses, saveCloudLibrary, importBrainscapePack } from './cloud.js';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -21,7 +21,7 @@ function readLocalSync(id) {
   try {const value=JSON.parse(localStorage.getItem(storageKey(id)));return {dirty:Boolean(value?._localSync?.dirty),revision:Number(value?._localSync?.revision)||0};}catch{return {dirty:false,revision:0};}
 }
 let initialLibrary=readLocal();
-const state = {library:initialLibrary||exampleLibrary(),view:'library',classId:null,deckId:null,user:null,query:'',sort:'recent',filter:'all',mobile:false,cloudReady:false,cloudLoading:false,cloudError:'',sync:'local',dirty:false,revision:0,study:null,visibleCards:100,authMode:'login',importDraft:null};
+const state = {library:initialLibrary||exampleLibrary(),publicCourses:[],publicCoursesError:'',view:'library',classId:null,deckId:null,user:null,query:'',sort:'recent',filter:'all',mobile:false,cloudReady:false,cloudLoading:false,cloudError:'',sync:'local',dirty:false,revision:0,study:null,visibleCards:100,authMode:'login',importDraft:null};
 let toastTimer, cloudTimer, syncChain=Promise.resolve(), syncGeneration=0, authGeneration=0, lastFocus, boundUserId;
 let storageWarningShown=false;
 const sounds = createSoundFeedback();
@@ -42,7 +42,9 @@ function toggleSound() {
 const logo = `<svg class="brand-logo" viewBox="0 0 36 36" fill="none" aria-hidden="true"><path d="M18 3c5.5 0 7.2 6.1 7.2 7.8 1.7 0 7.8 1.7 7.8 7.2s-6.1 7.2-7.8 7.2c0 1.7-1.7 7.8-7.2 7.8s-7.2-6.1-7.2-7.8C9.1 25.2 3 23.5 3 18s6.1-7.2 7.8-7.2C10.8 9.1 12.5 3 18 3Z" stroke="#98cce8" stroke-width="1.7"/><path d="M18 11v14m-7-7h14" stroke="#98cce8" stroke-width="1.7"/><circle cx="27.5" cy="8.5" r="3.2" fill="#ee9568"/></svg>`;
 const allCards = () => state.library.classes.flatMap(c=>c.decks.flatMap(d=>d.cards));
 const classCards = cls => cls.decks.flatMap(d=>d.cards);
-const currentClass = () => state.library.classes.find(c=>c.id===state.classId);
+const publicClasses = () => state.publicCourses.filter(entry=>entry.ownerId!==state.user?.id).map(entry=>entry.course);
+const isCommunityClass = cls => Boolean(cls && !state.library.classes.some(item=>item.id===cls.id) && publicClasses().some(item=>item.id===cls.id));
+const currentClass = () => state.library.classes.find(c=>c.id===state.classId)||publicClasses().find(c=>c.id===state.classId);
 const currentDeck = () => currentClass()?.decks.find(d=>d.id===state.deckId);
 const todayActivity = () => state.library.activity.filter(a=>a.date===dateKey()).reduce((sum,a)=>sum+a.cards,0);
 const num = value => Number(value).toLocaleString(language()==='it'?'it-IT':'en');
@@ -50,18 +52,37 @@ const dueCount = cards => cards.filter(c=>!c.confidence||!c.dueAt||Date.parse(c.
 const language = () => state.library.settings.language || 'en';
 const reviewLabel = count => language()==='it'?`${count} ${count===1?'ripasso':'ripassi'}`:`${count} ${count===1?'review':'reviews'}`;
 
-function setTheme(value) {
-  const theme=value==='light'?'light':'dark';
+const systemTheme = window.matchMedia?.('(prefers-color-scheme: dark)');
+let themePreference;
+try { themePreference = localStorage.getItem('flashlang.theme'); } catch { /* System appearance still works without browser storage. */ }
+function setTheme(value, persistPreference = true) {
+  themePreference = value==='light'||value==='dark'?value:'system';
+  const theme=themePreference==='system'?(systemTheme?.matches?'dark':'light'):themePreference;
   document.documentElement.dataset.theme=theme;
   $('meta[name="theme-color"]').content=theme==='light'?'#eeedf0':'#17161d';
-  try {localStorage.setItem('flashlang.theme',theme);} catch { /* Appearance still works without browser storage. */ }
+  if(persistPreference)try {localStorage.setItem('flashlang.theme',themePreference);} catch { /* Appearance still works without browser storage. */ }
 }
+systemTheme?.addEventListener('change',()=>{if(themePreference!=='light'&&themePreference!=='dark')setTheme('system',false);});
 
 function writeLocal() {
   try {localStorage.setItem(storageKey(state.user?.id),JSON.stringify({...state.library,_localSync:{dirty:state.user?state.dirty:false,revision:state.revision}}));return true;} catch {
     if (!storageWarningShown) {storageWarningShown=true;toast('Browser storage is full or unavailable. Export a backup to keep your cards.',true);}
     return false;
   }
+}
+function lastStudyKey() { return `recall.last-study.v1.${state.user?.id || 'guest'}`; }
+function readLastStudy() {
+  try {
+    const value=localStorage.getItem(lastStudyKey());
+    return value?JSON.parse(value):null;
+  } catch(error) {
+    console.warn('Could not read the last study preference:',error.message);
+    return null;
+  }
+}
+function writeLastStudy(scope,scopeId) {
+  try { localStorage.setItem(lastStudyKey(),JSON.stringify({scope,scopeId})); }
+  catch(error) { console.warn('Could not save the last study preference:',error.message); }
 }
 function persist() {
   if(state.user){state.revision++;state.dirty=true;}
@@ -155,11 +176,14 @@ function statsHtml() {
 }
 function libraryHtml() {
   let classes=[...state.library.classes];if(state.sort==='az')classes.sort((a,b)=>a.title.localeCompare(b.title));if(state.sort==='mastery')classes.sort((a,b)=>getMastery(classCards(a))-getMastery(classCards(b)));
+  const community=publicClasses();
   const date=new Date().toLocaleDateString(language()==='it'?'it-IT':'en',{weekday:'long',month:'short',day:'numeric'});
   return `<div class="page-heading library-heading"><div><div class="eyebrow"><span class="live-dot"></span>YOUR PERSONAL LEARNING SPACE</div><h1>My library<span class="heading-dot">.</span></h1><p>A home for everything you want to remember.</p></div><div class="heading-actions"><button class="btn btn-secondary" data-action="import">${icon('upload')}Import cards</button><button class="btn btn-primary" data-action="new-class">${icon('plus')}Create a class</button></div></div>
   <div class="overview-grid"><section class="hero" aria-label="Ready for a little progress?"><div class="hero-copy"><div class="hero-tag">${icon('spark')}MAKE IT STICK</div><h2>Small sessions.<br><em>Big possibilities.</em></h2><p>A few cards today. Knowledge that stays.</p><button class="btn btn-dark" data-action="study-all">Let’s study <span class="button-arrow">${icon('arrow')}</span></button></div><div class="hero-art" aria-hidden="true"><div class="glass-card glass-card-back"></div><div class="glass-card glass-card-front"><span class="glass-card-label">${icon('spark')}A LITTLE CURIOSITY</span><p>What will you<br>learn today?</p><span class="glass-card-line"></span><div class="glass-card-bottom"><span>ONE CARD AT A TIME</span>${icon('arrow')}</div></div><span class="floating-tag">${icon('check')}Made to stay with you</span></div><span class="hero-index">01 — YOUR NEXT CHAPTER</span></section>${questHtml()}</div>
   <div class="overview-caption"><span>Your learning, at a glance</span><time>${esc(date)}</time></div>${statsHtml()}<div class="section-heading"><h2>Your classes</h2><span class="section-count">${classes.length}</span><label class="push-right"><span class="sr-only">Sort classes</span><select class="sort-select" id="class-sort"><option value="recent" ${state.sort==='recent'?'selected':''}>Recently added</option><option value="az" ${state.sort==='az'?'selected':''}>Alphabetical</option><option value="mastery" ${state.sort==='mastery'?'selected':''}>Needs practice</option></select></label></div>
   ${classes.length?`<div class="class-grid">${classes.map(classCardHtml).join('')}</div>`:emptyHtml('Your next chapter starts here.','Create a class for something you’re learning, then add your first deck.','Create your first class','new-class')}
+  ${state.publicCoursesError?`<p class="settings-warning">${esc(state.publicCoursesError)}</p>`:''}
+  ${community.length?`<div class="section-heading"><h2>Community courses</h2><span class="section-count">${community.length}</span></div><div class="class-grid">${community.map(classCardHtml).join('')}</div>`:''}
   <div class="study-note">${icon('bulb')}<div><strong>Study smarter, at your own pace.</strong><p>Rate how well you know each card. We’ll bring the tricky ones back sooner.</p></div><button data-action="help">How it works ${icon('arrow')}</button></div>${footerHtml()}`;
 }
 function classCardHtml(cls) {
@@ -168,17 +192,17 @@ function classCardHtml(cls) {
 }
 function emptyHtml(title,description,label,action) {return `<div class="empty-state"><div class="empty-icon">${icon('cards')}</div><h3>${esc(title)}</h3><p>${esc(description)}</p>${label?`<button class="btn btn-primary" data-action="${action}">${icon('plus')}${esc(label)}</button>`:''}</div>`;}
 function classHtml() {
-  const cls=currentClass(),cards=classCards(cls);
-  return `<button class="back-link" data-action="library">${icon('back')}Back to my library</button><div class="class-header" style="${palette(cls.color)}"><div class="cover-icon">${icon(cls.icon)}</div><div><h1>${esc(cls.title)}</h1><p>${esc(cls.description||translateText('One card closer to knowing it by heart.',language()))}</p></div><div class="heading-actions"><button class="btn btn-secondary" data-action="edit-class">${icon('edit')}Edit class</button><button class="btn btn-primary" data-action="study-class" ${!cards.length?'disabled':''}>${icon('play')}Study class</button></div></div>
-  <div class="section-heading"><h2>Your decks</h2><span class="section-count">${cls.decks.length}</span><div class="heading-actions push-right"><button class="btn btn-secondary btn-sm" data-action="import">${icon('upload')}Import cards</button><button class="btn btn-blue btn-sm" data-action="new-deck">${icon('plus')}Add a deck</button></div></div>
-  ${cls.decks.length?`<div class="deck-list">${cls.decks.map(deck=>`<div class="deck-row"><div class="deck-symbol">${icon('cards')}</div><div class="deck-info"><button class="deck-title" data-action="deck" data-id="${esc(deck.id)}">${esc(deck.title)}</button><p>${num(deck.cards.length)} cards <span aria-hidden="true">·</span> ${dueCount(deck.cards)} ready to study</p></div><div class="deck-mastery"><div class="mastery-line"><span>Mastery</span><strong>${getMastery(deck.cards)}%</strong></div><div class="mastery-track"><span style="width:${getMastery(deck.cards)}%"></span></div></div><button class="btn btn-secondary btn-sm" data-action="study-deck" data-id="${esc(deck.id)}" ${!deck.cards.length?'disabled':''}>${icon('play')}Study</button><button class="icon-btn" data-action="deck" data-id="${esc(deck.id)}" aria-label="Open ${esc(deck.title)}">${icon('chevron')}</button></div>`).join('')}</div>`:emptyHtml('A fresh start.','Create a deck to keep related flashcards together.','Add your first deck','new-deck')}
+  const cls=currentClass(),cards=classCards(cls),communityClass=isCommunityClass(cls);
+  return `<button class="back-link" data-action="library">${icon('back')}Back to my library</button><div class="class-header" style="${palette(cls.color)}"><div class="cover-icon">${icon(cls.icon)}</div><div><h1>${esc(cls.title)}</h1><p>${esc(cls.description||translateText('One card closer to knowing it by heart.',language()))}</p>${communityClass?'<span class="field-hint">Public course · read-only</span>':''}</div><div class="heading-actions">${communityClass?'':`<button class="btn btn-secondary" data-action="edit-class">${icon('edit')}Edit class</button>`}<button class="btn btn-primary" data-action="study-class" ${!cards.length?'disabled':''}>${icon('play')}Study class</button></div></div>
+  <div class="section-heading"><h2>Your decks</h2><span class="section-count">${cls.decks.length}</span>${communityClass?'':`<div class="heading-actions push-right"><button class="btn btn-secondary btn-sm" data-action="import">${icon('upload')}Import cards</button><button class="btn btn-blue btn-sm" data-action="new-deck">${icon('plus')}Add a deck</button></div>`}</div>
+  ${cls.decks.length?`<div class="deck-list">${cls.decks.map(deck=>`<div class="deck-row"><div class="deck-symbol">${icon('cards')}</div><div class="deck-info"><button class="deck-title" data-action="deck" data-id="${esc(deck.id)}">${esc(deck.title)}</button><p>${num(deck.cards.length)} cards <span aria-hidden="true">·</span> ${dueCount(deck.cards)} ready to study</p></div><div class="deck-mastery"><div class="mastery-line"><span>Mastery</span><strong>${getMastery(deck.cards)}%</strong></div><div class="mastery-track"><span style="width:${getMastery(deck.cards)}%"></span></div></div><button class="btn btn-secondary btn-sm" data-action="study-deck" data-id="${esc(deck.id)}" ${!deck.cards.length?'disabled':''}>${icon('play')}Study</button><button class="icon-btn" data-action="deck" data-id="${esc(deck.id)}" aria-label="Open ${esc(deck.title)}">${icon('chevron')}</button></div>`).join('')}</div>`:emptyHtml('A fresh start.','Create a deck to keep related flashcards together.',communityClass?'':'Add your first deck',communityClass?'':'new-deck')}
   ${cards.length?`<div class="study-note">${icon('target')}<div><strong>${getMastery(cards)}% mastered. A little further every day.</strong><p>${num(cards.length)} flashcards across ${cls.decks.length} decks, all in one place.</p></div></div>`:''}${footerHtml()}`;
 }
 function deckHtml() {
-  const deck=currentDeck();let cards=deck.cards.filter(c=>state.filter==='starred'?c.starred:state.filter==='weak'?c.confidence<=2:true);
-  return `<button class="back-link" data-user-content="true" data-action="class" data-id="${esc(state.classId)}">${icon('back')}${esc(currentClass().title)}</button><div class="page-heading"><div><div class="eyebrow">YOUR FLASHCARDS</div><h1 data-user-content="true">${esc(deck.title)}</h1><p>${num(deck.cards.length)} cards <span aria-hidden="true">·</span> ${getMastery(deck.cards)}% mastered</p></div><div class="heading-actions"><button class="icon-btn" data-action="edit-deck" aria-label="Edit deck">${icon('edit')}</button><button class="icon-btn" data-action="export-deck" aria-label="Export deck as CSV">${icon('download')}</button><button class="btn btn-secondary" data-action="import">${icon('upload')}Import</button><button class="btn btn-primary" data-action="study-deck" data-id="${esc(deck.id)}" ${!deck.cards.length?'disabled':''}>${icon('play')}Study deck</button></div></div>
-  <div class="section-heading"><h2>Flashcards</h2><label class="push-right"><span class="sr-only">Filter flashcards</span><select class="sort-select" id="card-filter"><option value="all" ${state.filter==='all'?'selected':''}>All cards</option><option value="starred" ${state.filter==='starred'?'selected':''}>Starred cards</option><option value="weak" ${state.filter==='weak'?'selected':''}>Needs practice</option></select></label><button class="btn btn-blue btn-sm" data-action="new-card">${icon('plus')}Add a card</button></div>
-  ${cards.length?`<div class="card-list"><div class="card-list-head"><span>#</span><span>Question</span><span>Answer</span><span class="sr-only">Actions</span></div>${cards.slice(0,state.visibleCards).map((card,i)=>`<div class="card-row"><span class="card-number">${i+1}</span><div class="card-text">${esc(card.question)}</div><div class="card-text card-answer">${esc(card.answer)}</div><div class="card-row-actions"><i class="confidence-dot" style="--rate:${rates[card.confidence]}" title="${rateLabels[card.confidence]}"></i><button class="icon-btn ${card.starred?'starred':''}" data-action="star-card" data-id="${esc(card.id)}" aria-label="${card.starred?'Unstar':'Star'} card ${i+1}" aria-pressed="${card.starred}">${icon('star')}</button><button class="icon-btn" data-action="edit-card" data-id="${esc(card.id)}" aria-label="Edit card ${i+1}">${icon('edit')}</button><button class="icon-btn" data-action="delete-card" data-id="${esc(card.id)}" aria-label="Delete card ${i+1}">${icon('trash')}</button></div></div>`).join('')}</div>${cards.length>state.visibleCards?'<div style="text-align:center;margin-top:20px"><button class="btn btn-secondary" data-action="more-cards">Show more cards</button></div>':''}`:emptyHtml(deck.cards.length?'No cards match this filter.':'A question is the beginning.','Add a question and an answer, or import a whole list.','Add a card','new-card')}${footerHtml()}`;
+  const deck=currentDeck(),communityClass=isCommunityClass(currentClass());let cards=deck.cards.filter(c=>state.filter==='starred'?c.starred:state.filter==='weak'?c.confidence<=2:true);
+  return `<button class="back-link" data-user-content="true" data-action="class" data-id="${esc(state.classId)}">${icon('back')}${esc(currentClass().title)}</button><div class="page-heading"><div><div class="eyebrow">YOUR FLASHCARDS</div><h1 data-user-content="true">${esc(deck.title)}</h1><p>${num(deck.cards.length)} cards <span aria-hidden="true">·</span> ${getMastery(deck.cards)}% mastered</p></div><div class="heading-actions">${communityClass?'':`<button class="icon-btn" data-action="edit-deck" aria-label="Edit deck">${icon('edit')}</button><button class="icon-btn" data-action="export-deck" aria-label="Export deck as CSV">${icon('download')}</button><button class="btn btn-secondary" data-action="import">${icon('upload')}Import</button>`}<button class="btn btn-primary" data-action="study-deck" data-id="${esc(deck.id)}" ${!deck.cards.length?'disabled':''}>${icon('play')}Study deck</button></div></div>
+  <div class="section-heading"><h2>Flashcards</h2><label class="push-right"><span class="sr-only">Filter flashcards</span><select class="sort-select" id="card-filter"><option value="all" ${state.filter==='all'?'selected':''}>All cards</option><option value="starred" ${state.filter==='starred'?'selected':''}>Starred cards</option><option value="weak" ${state.filter==='weak'?'selected':''}>Needs practice</option></select></label>${communityClass?'':`<button class="btn btn-blue btn-sm" data-action="new-card">${icon('plus')}Add a card</button>`}</div>
+  ${cards.length?`<div class="card-list"><div class="card-list-head"><span>#</span><span>Question</span><span>Answer</span><span class="sr-only">Actions</span></div>${cards.slice(0,state.visibleCards).map((card,i)=>`<div class="card-row"><span class="card-number">${i+1}</span><div class="card-text">${esc(card.question)}</div><div class="card-text card-answer">${esc(card.answer)}</div><div class="card-row-actions"><i class="confidence-dot" style="--rate:${rates[card.confidence]}" title="${rateLabels[card.confidence]}"></i>${communityClass?'':`<button class="icon-btn ${card.starred?'starred':''}" data-action="star-card" data-id="${esc(card.id)}" aria-label="${card.starred?'Unstar':'Star'} card ${i+1}" aria-pressed="${card.starred}">${icon('star')}</button><button class="icon-btn" data-action="edit-card" data-id="${esc(card.id)}" aria-label="Edit card ${i+1}">${icon('edit')}</button><button class="icon-btn" data-action="delete-card" data-id="${esc(card.id)}" aria-label="Delete card ${i+1}">${icon('trash')}</button>`}</div></div>`).join('')}</div>${cards.length>state.visibleCards?'<div style="text-align:center;margin-top:20px"><button class="btn btn-secondary" data-action="more-cards">Show more cards</button></div>':''}`:emptyHtml(deck.cards.length?'No cards match this filter.':'A question is the beginning.','Add a question and an answer, or import a whole list.',communityClass?'':'Add a card',communityClass?'':'new-card')}${footerHtml()}`;
 }
 function searchHtml() {
   const query=state.query.trim().toLowerCase();const matches=[];
@@ -199,12 +223,12 @@ function progressHtml() {
   <div class="progress-grid progress-bottom"><section class="panel calendar-panel"><div class="panel-heading"><div><h3>Your consistency</h3><p>${num(stats.completedGoals)} daily goals reached · ${num(stats.activeDays)} active ${stats.activeDays===1?'day':'days'}</p></div><span class="panel-tag">12 WEEKS</span></div><div class="calendar-grid" role="img" aria-label="${esc(stats.last84Days.map(day=>`${day.date.toLocaleDateString(language()==='it'?'it-IT':'en',{month:'short',day:'numeric'})}: ${reviewLabel(day.count)}`).join(', '))}">${stats.last84Days.map(day=>`<span class="calendar-day" data-intensity="${day.count===0?0:day.count<stats.dailyGoal/2?1:day.count<stats.dailyGoal?2:3}" title="${esc(day.date.toLocaleDateString(language()==='it'?'it-IT':'en',{month:'short',day:'numeric'}))}: ${reviewLabel(day.count)}"></span>`).join('')}</div><div class="calendar-key"><span>Less</span><i data-intensity="0"></i><i data-intensity="1"></i><i data-intensity="2"></i><i data-intensity="3"></i><span>More</span></div></section><section class="panel focus-panel"><div class="panel-heading"><div><h3>Up next</h3><p>A good place to pick up today</p></div></div><div class="focus-count">${icon('target')}<div><strong>${focus}</strong><span>${stats.weakCards?`${num(stats.weakCards)} ${stats.weakCards===1?'card needs':'cards need'} extra practice`:'Your next session is ready when you are'}</span></div></div><div class="focus-breakdown"><span><b>${num(stats.dueCards)}</b> Due</span><span><b>${num(stats.newCards)}</b> New</span><span><b>${num(stats.weakCards)}</b> Tricky</span></div><button class="btn btn-blue focus-button" data-action="study-all">Start a session ${icon('arrow')}</button></section></div>${footerHtml()}`;
 }
 function settingsHtml() {
-  return `<div class="page-heading"><div><div class="eyebrow">MAKE YOURSELF AT HOME</div><h1>Your settings</h1><p>A study space that feels like yours.</p></div></div><div class="settings-stack"><section class="panel"><div class="settings-row"><div><h3>Appearance</h3><p>Choose a light or dark appearance for this device.</p></div><label><span class="sr-only">Theme</span><select id="theme-select" class="input theme-select"><option value="dark" ${document.documentElement.dataset.theme!=='light'?'selected':''}>Dark</option><option value="light" ${document.documentElement.dataset.theme==='light'?'selected':''}>Light</option></select></label></div></section>
+  return `<div class="page-heading"><div><div class="eyebrow">MAKE YOURSELF AT HOME</div><h1>Your settings</h1><p>A study space that feels like yours.</p></div></div><div class="settings-stack"><section class="panel"><div class="settings-row"><div><h3>Appearance</h3><p>Follow your device setting or choose a light or dark appearance.</p></div><label><span class="sr-only">Theme</span><select id="theme-select" class="input theme-select"><option value="system" ${themePreference!=='light'&&themePreference!=='dark'?'selected':''}>System</option><option value="dark" ${themePreference==='dark'?'selected':''}>Dark</option><option value="light" ${themePreference==='light'?'selected':''}>Light</option></select></label></div></section>
   <section class="panel"><div class="settings-row"><div><h3>Your daily goal</h3><p>A manageable number of cards to keep the habit going.</p></div><label><span class="sr-only">Cards per day</span><input id="daily-goal" type="number" class="input" min="5" max="500" step="5" value="${state.library.settings.dailyGoal}"></label><button class="btn btn-secondary btn-sm" data-action="save-goal">Save goal</button></div></section>
   <section class="panel"><div class="settings-row"><div><h3>Language</h3><p>Choose the language used for menus, buttons, and study controls.</p></div><label><span class="sr-only">Language</span><select id="language-select" class="input language-select"><option value="en" ${language()==='en'?'selected':''}>English</option><option value="it" ${language()==='it'?'selected':''}>Italiano</option></select></label></div></section>
   <section class="panel"><div class="settings-row"><div><h3>${state.user?'Your account':'Take your cards with you'}</h3><p>${state.user?`<span data-user-content="true">${esc(state.user.email)}</span> · <span>${state.sync==='synced'?'Your private library is synced.':'Your library is saved on this device.'}</span>`:'Sign in with your email and password to sync your library across devices.'}</p></div><button class="btn btn-secondary btn-sm" data-action="${state.user?'account':'login'}">${icon(state.user?'user':'cloud')}${state.user?'Manage account':'Log in or sign up'}</button></div>${state.sync==='error'?`<div class="settings-warning">Cloud sync needs attention. Your local copy is safe.<button class="btn btn-secondary btn-sm" style="margin-left:10px" data-action="retry-sync">Retry sync</button></div>`:''}</section>
   <section class="panel"><div class="settings-row"><div><h3>A copy for safekeeping</h3><p>Download all your classes, cards, and progress as a Flashlang backup.</p></div><button class="btn btn-secondary btn-sm" data-action="backup">${icon('download')}Export backup</button></div></section><section class="panel"><div class="settings-row"><div><h3>Bring your library back</h3><p>Restore a Flashlang JSON backup. You’ll review the details before replacing your library.</p></div><label class="btn btn-secondary btn-sm" tabindex="0">${icon('upload')}Choose backup<input class="backup-restore-input" id="restore-file" type="file" accept=".json,application/json"></label></div></section>
-  ${!state.user?`<section class="panel"><div class="settings-row"><div><h3>A little inspiration</h3><p>Add the three example classes to explore how Flashlang works.</p></div><button class="btn btn-secondary btn-sm" data-action="add-examples">Add examples</button></div></section>`:''}</div>${footerHtml()}`;
+  ${!state.user?`<section class="panel"><div class="settings-row"><div><h3>A little inspiration</h3><p>Add the example classes to explore how Flashlang works.</p></div><button class="btn btn-secondary btn-sm" data-action="add-examples">Add examples</button></div></section>`:''}</div>${footerHtml()}`;
 }
 
 function showModal(title,subtitle,body,{wide=false,cls=''}={}) {
@@ -219,7 +243,7 @@ function modalError(message) {sounds.play('error');let node=$('#modal-error');if
 function modalSuccess(message) {sounds.play('success');const node=$('#modal-success');if(node){node.textContent=translateText(message,language());node.hidden=false;}else{const p=document.createElement('p');p.className='form-success';p.role='status';p.textContent=translateText(message,language());$('#modal-root .modal-body').append(p);}}
 function classModal(edit=false) {
   const cls=edit?currentClass():null;
-  showModal(edit?'A little fine-tuning.':'A new place to learn.',edit?'Make this class feel like yours.':'Group your decks around a subject, a goal, or a big idea.',`<form id="class-form" data-edit="${edit}"><div class="form-group"><label class="label" for="class-title">Class name</label><input class="input" id="class-title" name="title" placeholder="e.g. Italian essentials" value="${esc(cls?.title||'')}" maxlength="200" required></div><div class="form-group"><label class="label" for="class-description">A little description <span class="muted">(optional)</span></label><input class="input" id="class-description" name="description" placeholder="What are you curious about?" value="${esc(cls?.description||'')}" maxlength="1000"></div><div class="form-group"><span class="label">Choose a color</span><input type="hidden" id="class-color" name="color" value="${cls?.color||'blue'}"><div class="color-options">${Object.entries(colors).map(([name,c])=>`<button type="button" class="color-option ${(cls?.color||'blue')===name?'selected':''}" data-action="choose-color" data-color="${name}" style="--accent:${c.accent}" aria-label="${name}" aria-pressed="${(cls?.color||'blue')===name}">${(cls?.color||'blue')===name?icon('check'):''}</button>`).join('')}</div></div><div id="modal-error" class="form-error" role="alert" hidden></div><div class="form-actions">${edit?'<button type="button" class="btn btn-danger btn-sm" data-action="delete-class">Delete class</button>':''}<button type="button" class="btn btn-quiet" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">${edit?'Save changes':'Create class'}${icon('arrow')}</button></div></form>`);
+  showModal(edit?'A little fine-tuning.':'A new place to learn.',edit?'Make this class feel like yours.':'Group your decks around a subject, a goal, or a big idea.',`<form id="class-form" data-edit="${edit}"><div class="form-group"><label class="label" for="class-title">Class name</label><input class="input" id="class-title" name="title" placeholder="e.g. Italian essentials" value="${esc(cls?.title||'')}" maxlength="200" required></div><div class="form-group"><label class="label" for="class-description">A little description <span class="muted">(optional)</span></label><input class="input" id="class-description" name="description" placeholder="What are you curious about?" value="${esc(cls?.description||'')}" maxlength="1000"></div><div class="form-group"><span class="label">Course visibility</span><label class="small muted" style="display:flex;align-items:center;gap:8px;line-height:1.7"><input id="class-visibility" type="checkbox" name="visibility" value="public" ${cls?.visibility==='public'?'checked':''} ${state.user?'':'disabled'}>Available to everyone</label><p class="field-hint" id="class-visibility-hint">${state.user?(cls?.visibility==='public'?'Anyone can view and study this course, even without an account.':'Private by default. Turn on availability to share this course.'):'Sign in to make a course available to everyone. Your classes stay private.'}</p></div><div class="form-group"><span class="label">Choose a color</span><input type="hidden" id="class-color" name="color" value="${cls?.color||'blue'}"><div class="color-options">${Object.entries(colors).map(([name,c])=>`<button type="button" class="color-option ${(cls?.color||'blue')===name?'selected':''}" data-action="choose-color" data-color="${name}" style="--accent:${c.accent}" aria-label="${name}" aria-pressed="${(cls?.color||'blue')===name}">${(cls?.color||'blue')===name?icon('check'):''}</button>`).join('')}</div></div><div id="modal-error" class="form-error" role="alert" hidden></div><div class="form-actions">${edit?'<button type="button" class="btn btn-danger btn-sm" data-action="delete-class">Delete class</button>':''}<button type="button" class="btn btn-quiet" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">${edit?'Save changes':'Create class'}${icon('arrow')}</button></div></form>`);
 }
 function deckModal(edit=false) {
   if(!currentClass())return classModal();
@@ -368,13 +392,15 @@ function helpModal() {
 function startStudy(scope='all',id=null) {
   if(state.cloudLoading||state.cloudError)return toast('Let your library finish loading first.',true);
   const pool=[];
-  for(const cls of state.library.classes){if(scope==='class'&&cls.id!==(id||state.classId))continue;for(const deck of cls.decks){if(scope==='deck'&&deck.id!==id)continue;for(const card of deck.cards)pool.push({cls,deck,card});}}
+  const classes=scope==='all'?state.library.classes:[currentClass()].filter(Boolean);
+  for(const cls of classes){if(scope==='class'&&cls.id!==(id||state.classId))continue;for(const deck of cls.decks){if(scope==='deck'&&deck.id!==id)continue;for(const card of deck.cards)pool.push({cls,deck,card});}}
   if(!pool.length)return toast('Add a few cards first. A little knowledge starts somewhere.');
   const selected=selectStudyCards(pool.map(p=>p.card),{limit:20});
   const byId=new Map(pool.map(p=>[p.card.id,p]));
   const items=selected.map(card=>byId.get(card.id));
   if(!items.length)return toast('You’re all caught up. Come back a little later.');
   state.study={items,index:0,revealed:false,ratings:[],seconds:0,lastReviewAt:Date.now(),scope,scopeId:id,title:scope==='deck'?items[0].deck.title:scope==='class'?items[0].cls.title:translateText('A little of everything',language()),subtitle:scope==='deck'?items[0].cls.title:translateText('Your personal study session',language())};
+  writeLastStudy(scope,id);
   sounds.play('start');
   closeModal();render();window.scrollTo({top:0,behavior:'instant'});
 }
@@ -436,6 +462,10 @@ function summaryHtml() {
   return `<section class="session-summary"><div class="celebration" aria-hidden="true"><i style="--i:0"></i><i style="--i:1"></i><i style="--i:2"></i><i style="--i:3"></i><i style="--i:4"></i><i style="--i:5"></i><i style="--i:6"></i><i style="--i:7"></i><i style="--i:8"></i><i style="--i:9"></i><i style="--i:10"></i><i style="--i:11"></i></div><div class="summary-icon">${icon('check')}</div><div class="eyebrow">A LITTLE WISER THAN BEFORE</div><h1>That’s progress. Yours.</h1><div class="earned-xp">${icon('spark')} +${count*10} XP earned</div><p>A few minutes well spent.<br>The tricky cards will be here when you’re ready to meet them again.</p><div class="summary-stats"><div><strong>${count}</strong><span>Cards studied</span></div><div><strong>${Math.max(1,Math.round(s.seconds/60))} min</strong><span>Time invested</span></div><div><strong>${average.toFixed(1)} / 5</strong><span>Avg. confidence</span></div></div><div class="summary-actions"><button class="btn btn-secondary" data-action="exit-study">Back to my library</button><button class="btn btn-primary" data-action="study-again">Keep learning ${icon('arrow')}</button></div></section>`;
 }
 function exitStudy() {state.study=null;render();window.scrollTo({top:0,behavior:'instant'});}
+function resumeLastStudy() {
+  const {scope,scopeId}=resolveStudyScope(state.library,readLastStudy());
+  startStudy(scope,scopeId);
+}
 
 async function activateUser(user,force=false) {
   if(!user)return;
@@ -482,6 +512,7 @@ function resetGuest() {
 }
 async function initCloud() {
   if(!isCloudConfigured())return;
+  loadPublicCourses().then(courses=>{state.publicCourses=courses;state.publicCoursesError='';renderContent();}).catch(error=>{state.publicCoursesError=error.message||'Could not load public courses.';renderContent();console.error('Public courses could not load:',error.message);});
   try {
     const client=await getCloudClient();
     client.auth.onAuthStateChange((event,session)=>{
@@ -520,7 +551,7 @@ const actions = {
   import:()=>importModal(),'import-back':()=>importModal(true),'confirm-import':finishImport,'load-brainscape':loadBrainscapePack,
   login:()=>authModal(),'signup':()=>authModal('signup'),'forgot-password':()=>authModal('forgot'),account:accountModal,logout,
   'settings-from-modal':()=>{closeModal();navigate('settings');},'close-modal':closeModal,help:helpModal,
-  'study-all':()=>startStudy(),'study-class':()=>startStudy('class',state.classId),'study-deck':el=>startStudy('deck',el.dataset.id||state.deckId),
+  'study-all':resumeLastStudy,'study-class':()=>startStudy('class',state.classId),'study-deck':el=>startStudy('deck',el.dataset.id||state.deckId),
   reveal:revealAnswer,rate:el=>rateAnswer(Number(el.dataset.rating)),'exit-study':exitStudy,
   'study-again':()=>{const s=state.study;state.study=null;startStudy(s.scope,s.scopeId);},
   'save-goal':()=>{const value=Number($('#daily-goal').value);if(!Number.isInteger(value)||value<5||value>500)return toast('Choose a daily goal between 5 and 500 cards.',true);state.library.settings.dailyGoal=value;persist();render();toast('A little goal, made for you.');},
@@ -532,16 +563,18 @@ const actions = {
 
 document.addEventListener('click',event=>{
   const el=event.target.closest('[data-action]');
-  if(el){const action=el.dataset.action;if(actions[action]){event.preventDefault();if((state.cloudLoading||state.cloudError)&&['new-class','edit-class','new-deck','edit-deck','new-card','edit-card','import','backup','add-examples','save-goal'].includes(action))return toast('Load your account library before making changes.',true);if(!['toggle-sound','study-all','study-class','study-deck','study-again','reveal','rate'].includes(action))sounds.play('tap');Promise.resolve(actions[action](el)).catch(error=>toast(error.message||'Something went wrong. Please try again.',true));}}
+  if(el){const action=el.dataset.action;if(actions[action]){event.preventDefault();if(isCommunityClass(currentClass())&&['edit-class','delete-class','new-deck','edit-deck','delete-deck','new-card','edit-card','delete-card','star-card','import','export-deck'].includes(action))return toast('Public courses are read-only.',true);if((state.cloudLoading||state.cloudError)&&['new-class','edit-class','new-deck','edit-deck','new-card','edit-card','import','backup','add-examples','save-goal'].includes(action))return toast('Load your account library before making changes.',true);if(!['toggle-sound','study-all','study-class','study-deck','study-again','reveal','rate'].includes(action))sounds.play('tap');Promise.resolve(actions[action](el)).catch(error=>toast(error.message||'Something went wrong. Please try again.',true));}}
   else if(event.target.matches('[data-backdrop]'))closeModal();
 });
 document.addEventListener('submit',event=>{
   const form=event.target;event.preventDefault();
+  if(isCommunityClass(currentClass())&&['class-form','deck-form','card-form','import-form'].includes(form.id))return toast('Public courses are read-only.',true);
   try{
     if(form.id==='class-form'){
       const values=new FormData(form),title=values.get('title').trim();if(!title)return modalError('Give your class a name.');
-      if(form.dataset.edit==='true'){Object.assign(currentClass(),{title,description:values.get('description').trim(),color:values.get('color')});persist();closeModal();render();toast('A little update, saved.');}
-      else{const cls={id:newId(),title,description:values.get('description').trim(),color:values.get('color'),icon:'book',createdAt:new Date().toISOString(),decks:[]};state.library.classes.unshift(cls);persist();closeModal();navigate('class',cls.id);toast('A new class. A new possibility.');}
+      const visibility=state.user&&values.get('visibility')==='public'?'public':'private';
+      if(form.dataset.edit==='true'){Object.assign(currentClass(),{title,description:values.get('description').trim(),color:values.get('color'),visibility});persist();closeModal();render();toast('A little update, saved.');}
+      else{const cls={id:newId(),title,description:values.get('description').trim(),color:values.get('color'),icon:'book',visibility,createdAt:new Date().toISOString(),decks:[]};state.library.classes.unshift(cls);persist();closeModal();navigate('class',cls.id);toast('A new class. A new possibility.');}
     }
     if(form.id==='deck-form'){
       const title=new FormData(form).get('title').trim();if(!title)return modalError('Give your deck a name.');
@@ -563,6 +596,7 @@ document.addEventListener('input',event=>{
 });
 document.addEventListener('change',event=>{
   const el=event.target;
+  if(el.id==='class-visibility'){const hint=$('#class-visibility-hint');if(hint)hint.textContent=el.checked?'Anyone can view and study this course, even without an account.':'Private by default. Turn on availability to share this course.';return;}
   if(el.id==='theme-select'){setTheme(el.value);return;}
   if(el.id==='language-select'){state.library.settings.language=el.value==='it'?'it':'en';persist();render();return;}
   if(el.id==='class-sort'){state.sort=el.value;renderContent();}

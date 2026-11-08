@@ -1,20 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateLibrary, emptyLibrary, newCard } from '../src/data.js';
+import { validateLibrary, emptyLibrary, exampleLibrary, newCard } from '../src/data.js';
 
 function backup() {
   return {
     version: 1,
     classes: [
       {
-        id: 'class-one', title: 'Italian', description: 'Useful expressions', color: 'green', icon: 'globe', createdAt: '2026-11-01T10:00:00.000Z',
+        id: 'class-one', title: 'Italian', description: 'Useful expressions', color: 'green', icon: 'globe', visibility: 'private', createdAt: '2026-11-01T10:00:00.000Z',
         decks: [{
           id: 'deck-one', title: 'Greetings', createdAt: '2026-11-01T11:00:00.000Z',
           cards: [{ id: 'card-one', question: 'Buongiorno?', answer: 'Good morning', confidence: 4, reviewCount: 8, dueAt: '2026-11-10T10:00:00.000Z', reviewedAt: '2026-11-07T10:00:00.000Z', starred: true }],
         }],
       },
       {
-        id: 'class-two', title: 'Science', description: '', color: 'purple', icon: 'bulb', createdAt: '2026-11-02T10:00:00.000Z',
+        id: 'class-two', title: 'Science', description: '', color: 'purple', icon: 'bulb', visibility: 'private', createdAt: '2026-11-02T10:00:00.000Z',
         decks: [{
           id: 'deck-two', title: 'Biology', createdAt: '2026-11-02T11:00:00.000Z',
           cards: [{ id: 'card-two', question: 'What stores genetic information?', answer: 'DNA', confidence: 0, reviewCount: 0, dueAt: null, reviewedAt: null, starred: false }],
@@ -134,6 +134,17 @@ test('display preferences are restricted and unknown metadata is discarded', () 
   assert.equal('password' in restored, false);
 });
 
+test('course visibility is limited to public or private and defaults to private', () => {
+  const library = backup();
+  library.classes[0].visibility = 'public';
+  library.classes[1].visibility = 'unlisted';
+  const restored = validateLibrary(library);
+  assert.equal(restored.classes[0].visibility, 'public');
+  assert.equal(restored.classes[1].visibility, 'private');
+  delete library.classes[0].visibility;
+  assert.equal(validateLibrary(library).classes[0].visibility, 'private');
+});
+
 test('activity filters malformed entries and normalizes counters', () => {
   const library = backup();
   library.activity = [
@@ -176,4 +187,15 @@ test('empty libraries and newly created cards contain clean defaults', () => {
   assert.equal(card.starred, false);
   assert.equal(card.dueAt, null);
   assert.equal(card.reviewedAt, null);
+});
+
+test('default examples include one Inglese course with 13 unique-prompt lectures across A1–C1', () => {
+  const library = exampleLibrary();
+  const course = library.classes.find(item => item.title === 'Inglese');
+  assert.ok(course);
+  assert.equal(course.decks.length, 13);
+  assert.deepEqual(course.decks.map(deck => deck.title.slice(0, 2)), ['A1', 'A1', 'A1', 'A2', 'A2', 'A2', 'A2', 'B1', 'B1', 'B1', 'B2', 'B2', 'C1']);
+  const prompts = course.decks.flatMap(deck => deck.cards.map(card => card.question.toLocaleLowerCase('it')));
+  assert.equal(prompts.length, 114);
+  assert.equal(new Set(prompts).size, prompts.length);
 });

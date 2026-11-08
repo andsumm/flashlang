@@ -9,15 +9,15 @@ The app is a progressive web app (PWA): use it in a browser or install it on a p
 ## ✨ What you can do
 
 - **Organize a study library** into classes, decks, and question-and-answer cards.
-- **Study at your own pace.** Rate each answer from 1 to 5; confident cards get longer review intervals, while tricky cards return sooner. Smart sessions prioritize due and unseen cards, and you can also study all cards or focus on weaker ones.
+- **Study at your own pace.** Rate each answer from 1 to 5; confident cards get longer review intervals, while tricky cards return sooner. Smart sessions prioritize due and unseen cards, and the play button remembers your last class or deck.
 - **See your progress** with review and study-time totals, mastery, streaks, daily goals, and activity charts.
 - **Bring your own cards.** Import CSV, TSV, text, or JSON files, paste spreadsheet rows or `Q:` / `A:` blocks, or import from a public card pack. Export decks as CSV or back up and restore your full library as JSON.
-- **Make it yours** with light and dark themes, English and Italian interface text, and optional locally generated sound cues.
+- **Make it yours** with a theme that follows your device’s light or dark setting (or a manual override), English and Italian interface text, and optional locally generated sound cues.
 - **Keep learning offline.** After the first successful online load, the app shell and guest library are available offline on that device.
 
 ## 🧭 How the app is structured
 
-Flashlang is a static frontend built with browser-native HTML, CSS, and JavaScript modules. It has no bundler or package-install step. The app can run as a guest without a backend; Supabase is an optional service for account authentication, private cloud libraries, and public pack importing.
+Flashlang is a static frontend built with browser-native HTML, CSS, and JavaScript modules. It has no bundler or package-install step. The app can run as a guest without a backend; Supabase is an optional service for account authentication, private cloud libraries, public courses, and public pack importing.
 
 The main data model is a **library → classes → decks → cards** hierarchy. Each card stores its question, answer, confidence, review schedule, and optional starred state. Study activity and preferences live with the library.
 
@@ -75,7 +75,7 @@ The service worker caches only public interface files from this site's own path.
 
 Guest mode stores the library in browser storage on the current device. To enable accounts for another deployment, connect a Supabase project:
 
-1. Run [`supabase/schema.sql`](./supabase/schema.sql) in the project's SQL Editor. It creates a library table with row-level security so each signed-in user can access only their own library.
+1. Run [`supabase/schema.sql`](./supabase/schema.sql) in the project's SQL Editor. It creates a private library table with row-level security, plus a separate public-course listing. A course is private by default; its owner can make it available to anyone, including visitors who are not signed in. Only courses explicitly marked public are copied to the listing. Re-run the schema after app updates to apply schema changes.
 2. Enable the Email provider in Supabase Authentication and configure the site's URL and allowed redirect URLs for your deployment and local development.
 3. Add the project URL and its public publishable key (or legacy anon public key) to `config.js`:
 
@@ -90,7 +90,7 @@ The URL and public key are intended for browser use. **Never** put a `service_ro
 
 The Supabase JavaScript SDK is loaded only when cloud features are configured. Email confirmations and password-reset delivery depend on the authentication and email settings of the Supabase project.
 
-Each account's library is stored as one JSON document. Updates are saved as a whole; simultaneous edits from multiple devices use last-write-wins rather than collaborative merging. Browser storage is specific to a device and browser profile, so keep a JSON backup before clearing browser data or changing devices.
+Each account's library is stored as one JSON document. Updates are saved as a whole; simultaneous edits from multiple devices use last-write-wins rather than collaborative merging. Public courses are read-only for visitors and remain managed from the owner's account. Browser storage is specific to a device and browser profile, so keep a JSON backup before clearing browser data or changing devices.
 
 ## 🚀 Build and publish
 

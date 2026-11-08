@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dateKey, getMastery, getStreak, scheduleReview, selectStudyCards } from '../src/study.js';
+import { dateKey, getMastery, getStreak, resolveStudyScope, scheduleReview, selectStudyCards } from '../src/study.js';
 
 const now = new Date('2026-11-07T12:00:00Z');
 
@@ -34,6 +34,18 @@ test('smart queue prioritizes overdue and new cards without showing mastered ear
   assert.equal(selectStudyCards(cards, { now, mode: 'all' }).length, 3);
   assert.equal(selectStudyCards([cards[0]], { now }).length, 1);
   assert.equal(selectStudyCards(cards, { now, limit: 0 }).length, 0);
+});
+
+test('last study scope resumes a populated class or deck and falls back to all', () => {
+  const library = { classes: [
+    { id: 'class-a', decks: [{ id: 'deck-a', cards: [{}] }, { id: 'deck-empty', cards: [] }] },
+    { id: 'class-empty', decks: [] },
+  ] };
+  assert.deepEqual(resolveStudyScope(library, { scope: 'class', scopeId: 'class-a' }), { scope: 'class', scopeId: 'class-a' });
+  assert.deepEqual(resolveStudyScope(library, { scope: 'deck', scopeId: 'deck-a' }), { scope: 'deck', scopeId: 'deck-a' });
+  assert.deepEqual(resolveStudyScope(library, { scope: 'deck', scopeId: 'deck-empty' }), { scope: 'all', scopeId: null });
+  assert.deepEqual(resolveStudyScope(library, { scope: 'class', scopeId: 'deleted' }), { scope: 'all', scopeId: null });
+  assert.deepEqual(resolveStudyScope(library, null), { scope: 'all', scopeId: null });
 });
 
 test('mastery includes unseen cards', () => {

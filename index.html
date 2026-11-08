@@ -14,8 +14,13 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="color-scheme" content="dark light">
     <script>
-      // Apply the saved device preference before styles load to avoid a bright first frame.
-      try { if (localStorage.getItem('flashlang.theme') === 'light') document.documentElement.dataset.theme = 'light'; } catch {}
+      // Resolve the saved preference or follow the device theme before styles load.
+      let themePreference;
+      try { themePreference = localStorage.getItem('flashlang.theme'); } catch {}
+      const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+      document.documentElement.dataset.theme = themePreference === 'light' || themePreference === 'dark'
+        ? themePreference
+        : prefersDark ? 'dark' : 'light';
       document.querySelector('meta[name="theme-color"]').content = document.documentElement.dataset.theme === 'light' ? '#eeedf0' : '#17161d';
     </script>
     <link rel="stylesheet" href="./styles.css">

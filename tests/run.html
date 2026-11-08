@@ -7,7 +7,7 @@
 <pre id="results">Running…</pre>
 <script type="module">
 import { parseImport, toCsv } from '../src/importer.js';
-import { dateKey, getMastery, getStreak, scheduleReview, selectStudyCards } from '../src/study.js';
+import { dateKey, getMastery, getStreak, resolveStudyScope, scheduleReview, selectStudyCards } from '../src/study.js';
 const output = document.querySelector('#results');
 const lines = [];
 let failures = 0;
@@ -35,6 +35,14 @@ test('Low confidence one-minute review', () => equal(scheduleReview({reviewCount
 test('High confidence seven-day review', () => equal(scheduleReview({reviewCount:0,confidence:0}, 5, now).dueAt, '2026-11-14T12:00:00.000Z'));
 test('Year interval cap', () => equal(Date.parse(scheduleReview({reviewCount:100,confidence:5}, 5, now).dueAt) - now.getTime(), 365*86400000));
 test('Smart queue', () => equal(selectStudyCards([{id:'future',reviewCount:1,confidence:5,dueAt:'2027-01-01'}, {id:'new',confidence:0}, {id:'due',reviewCount:1,confidence:1,dueAt:'2026-01-01'}], {now}).map(c=>c.id), ['due','new']));
+test('Last study scope resumes a populated class or deck and falls back to all', () => {
+  const library = {classes:[{id:'class-a',decks:[{id:'deck-a',cards:[{}]},{id:'deck-empty',cards:[]}]},{id:'class-empty',decks:[]}]};
+  equal(resolveStudyScope(library,{scope:'class',scopeId:'class-a'}),{scope:'class',scopeId:'class-a'});
+  equal(resolveStudyScope(library,{scope:'deck',scopeId:'deck-a'}),{scope:'deck',scopeId:'deck-a'});
+  equal(resolveStudyScope(library,{scope:'deck',scopeId:'deck-empty'}),{scope:'all',scopeId:null});
+  equal(resolveStudyScope(library,{scope:'class',scopeId:'deleted'}),{scope:'all',scopeId:null});
+  equal(resolveStudyScope(library,null),{scope:'all',scopeId:null});
+});
 test('Mastery includes unseen cards', () => equal(getMastery([{confidence:5},{confidence:0}]),50));
 test('Local date key', () => equal(dateKey(new Date(2026,10,7,12)),'2026-11-07'));
 test('Yesterday maintains streak', () => equal(getStreak([{date:'2026-11-06',cards:1},{date:'2026-11-05',cards:2}],new Date(2026,10,7,12)),2));

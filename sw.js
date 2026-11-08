@@ -17,6 +17,7 @@ const SHELL_PATHS = [
   'src/sounds.js',
   'src/importer.js',
   'src/study.js',
+  'src/brainscape.js',
   'src/cloud.js',
   'manifest.webmanifest',
   'assets/favicon.svg',

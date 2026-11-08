@@ -38,6 +38,27 @@ create policy "Delete own library" on public.libraries
   for delete to authenticated
   using ((select auth.uid()) = owner_id);
 
+create table if not exists public.public_courses (
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  course_id text not null,
+  data jsonb not null,
+  updated_at timestamptz not null default now(),
+  primary key (owner_id, course_id),
+  constraint public_course_is_object check (jsonb_typeof(data) = 'object')
+);
+
+alter table public.public_courses enable row level security;
+alter table public.public_courses force row level security;
+
+revoke all on table public.public_courses from anon;
+revoke all on table public.public_courses from authenticated;
+grant select on table public.public_courses to anon, authenticated;
+
+drop policy if exists "Read public courses" on public.public_courses;
+create policy "Read public courses" on public.public_courses
+  for select to anon, authenticated
+  using (data ->> 'visibility' = 'public');
+
 create or replace function public.set_library_updated_at()
 returns trigger
 language plpgsql
@@ -54,5 +75,30 @@ drop trigger if exists set_library_updated_at on public.libraries;
 create trigger set_library_updated_at
   before update on public.libraries
   for each row execute function public.set_library_updated_at();
+
+create or replace function public.sync_public_courses()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+set row_security = off
+as $$
+begin
+  delete from public.public_courses where owner_id = new.owner_id;
+  insert into public.public_courses (owner_id, course_id, data, updated_at)
+  select new.owner_id, course.value ->> 'id', course.value, now()
+  from jsonb_array_elements(new.data -> 'classes') as course(value)
+  where jsonb_typeof(course.value) = 'object'
+    and course.value ->> 'visibility' = 'public'
+    and nullif(course.value ->> 'id', '') is not null;
+  return new;
+end;
+$$;
+
+revoke all on function public.sync_public_courses() from public;
+drop trigger if exists sync_public_courses on public.libraries;
+create trigger sync_public_courses
+  after insert or update on public.libraries
+  for each row execute function public.sync_public_courses();
 
 commit;

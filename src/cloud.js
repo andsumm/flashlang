@@ -1,4 +1,5 @@
 import { normalizeBrainscapePackUrl } from './brainscape.js';
+import { validateLibrary } from './data.js';
 
 // The library is only downloaded when cloud accounts are configured.
 // Local study, imports, and editing work without any third-party JavaScript.
@@ -106,6 +107,26 @@ export async function loadCloudLibrary(userId) {
     .maybeSingle();
   if (error) throw new Error(`Could not load your library: ${error.message}`);
   return data?.data ?? null;
+}
+
+export async function loadPublicCourses() {
+  const client = await getCloudClient();
+  const { data, error } = await client
+    .from('public_courses')
+    .select('owner_id,course_id,data')
+    .order('updated_at', { ascending: false });
+  if (error) throw new Error(`Could not load public courses: ${error.message}`);
+  return (data || []).map(row => {
+    const library = validateLibrary({
+      version: 1,
+      classes: [row.data],
+      activity: [],
+      settings: { dailyGoal: 20 },
+    });
+    const course = library.classes[0];
+    course.id = `${row.owner_id}:${row.course_id}`;
+    return { ownerId: row.owner_id, course };
+  });
 }
 
 export async function saveCloudLibrary(userId, library) {

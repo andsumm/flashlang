@@ -52,6 +52,18 @@ export function selectStudyCards(cards, { limit = 20, now = new Date(), mode = '
     || a.index - b.index).slice(0, maximum).map(item => item.card);
 }
 
+export function resolveStudyScope(library, lastStudy) {
+  if (lastStudy?.scope === 'class' && typeof lastStudy.scopeId === 'string') {
+    const cls = library.classes.find(item => item.id === lastStudy.scopeId);
+    if (cls?.decks.some(deck => deck.cards.length)) return { scope: 'class', scopeId: cls.id };
+  }
+  if (lastStudy?.scope === 'deck' && typeof lastStudy.scopeId === 'string') {
+    const deck = library.classes.flatMap(cls => cls.decks).find(item => item.id === lastStudy.scopeId);
+    if (deck?.cards.length) return { scope: 'deck', scopeId: deck.id };
+  }
+  return { scope: 'all', scopeId: null };
+}
+
 export function getMastery(cards) {
   if (!cards.length) return 0;
   return Math.round(cards.reduce((sum, card) => sum + Math.min(5, Math.max(0, Number(card.confidence) || 0)), 0) / (cards.length * 5) * 100);
