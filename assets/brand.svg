@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="74" viewBox="0 0 360 74" fill="none">
+  <title>Flashlang</title>
+  <g transform="translate(2 2) scale(1.9)">
+    <path d="M18 3c5.5 0 7.2 6.1 7.2 7.8 1.7 0 7.8 1.7 7.8 7.2s-6.1 7.2-7.8 7.2c0 1.7-1.7 7.8-7.2 7.8s-7.2-6.1-7.2-7.8C9.1 25.2 3 23.5 3 18s6.1-7.2 7.8-7.2C10.8 9.1 12.5 3 18 3Z" stroke="#98cce8" stroke-width="1.7"/>
+    <path d="M18 11v14m-7-7h14" stroke="#98cce8" stroke-width="1.7"/>
+    <circle cx="27.5" cy="8.5" r="3.2" fill="#ee9568"/>
+  </g>
+  <text x="76" y="52" fill="#252529" font-family="DM Sans, sans-serif" font-size="40" font-weight="650" letter-spacing="-2">flashlang<tspan fill="#9f8dbf">.</tspan></text>
+</svg>

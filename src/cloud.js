@@ -1,3 +1,5 @@
+import { normalizeBrainscapePackUrl } from './brainscape.js';
+
 // The library is only downloaded when cloud accounts are configured.
 // Local study, imports, and editing work without any third-party JavaScript.
 const SUPABASE_SDK_URL = 'https://esm.sh/@supabase/supabase-js@2.57.4';
@@ -20,6 +22,45 @@ export function isCloudConfigured() {
   } catch {
     return false;
   }
+}
+
+export async function importBrainscapePack(input) {
+  const packUrl = normalizeBrainscapePackUrl(input);
+  const { url, key } = cloudConfig();
+  if (!url || !key) {
+    throw new Error('Brainscape URL import needs the Supabase Edge Function. See the setup instructions in the README.');
+  }
+  let response;
+  try {
+    response = await fetch(`${url}/functions/v1/import-brainscape`, {
+      method: 'POST',
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ url: packUrl }),
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch {
+    throw new Error('Could not reach the Brainscape import service. Check your connection and try again.');
+  }
+  let result;
+  try { result = await response.json(); }
+  catch { throw new Error('The Brainscape import service returned an invalid response.'); }
+  if (!response.ok) {
+    throw new Error(typeof result?.error === 'string' ? result.error : 'Could not import that Brainscape pack.');
+  }
+  if (!result || typeof result.title !== 'string' || !Array.isArray(result.cards) ||
+      result.cards.some(card => !card || typeof card.question !== 'string' || typeof card.answer !== 'string')) {
+    throw new Error('The Brainscape import service returned invalid card data.');
+  }
+  return {
+    title: result.title,
+    cards: result.cards,
+    warnings: Array.isArray(result.warnings) && result.warnings.every(warning => typeof warning === 'string')
+      ? result.warnings : [],
+  };
 }
 
 export async function getCloudClient() {

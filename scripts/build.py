@@ -9,7 +9,7 @@ import shutil
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "_site"
 ROOT_FILES = (
-    "index.html", "config.js", "styles.css", "design.css", "style.css", "app.js",
+    "index.html", "config.js", "styles.css", "design.css", "themes.css", "style.css", "app.js",
     "favicon.svg", "favicon.ico", "manifest.webmanifest", "sw.js", "robots.txt",
 )
 DIRECTORIES = ("src", "assets", "public", "samples")

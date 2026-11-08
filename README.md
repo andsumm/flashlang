@@ -1,101 +1,104 @@
-# Flashlang
+![Flashlang](./assets/brand.svg)
 
-A simple Brainscape-inspired study app with classes and decks, card importing, confidence-based study, and optional email/password accounts. The frontend is plain HTML, CSS, and JavaScript. There is no package installation or paid API requirement.
+Flashlang is a calm, confidence-based flashcard app for building knowledge a little at a time. Organize what you want to learn into classes and decks, then study with short sessions that bring the cards you find difficult back sooner.
 
-The site is published at [andsumm.github.io/flashlang](https://andsumm.github.io/flashlang/) from the [andsumm/flashlang repository](https://github.com/andsumm/flashlang). Email/password accounts and private library storage are connected to the Supabase project configured in `config.js`.
+The app is a progressive web app (PWA): use it in a browser or install it on a phone. A guest library works without an account and is saved in that browser. Signing in is optional and enables private library sync across devices through the configured Supabase project.
 
-## Run locally
+**Try it:** [andsumm.github.io/flashlang](https://andsumm.github.io/flashlang/)
+
+## ✨ What you can do
+
+- **Organize a study library** into classes, decks, and question-and-answer cards.
+- **Study at your own pace.** Rate each answer from 1 to 5; confident cards get longer review intervals, while tricky cards return sooner. Smart sessions prioritize due and unseen cards, and you can also study all cards or focus on weaker ones.
+- **See your progress** with review and study-time totals, mastery, streaks, daily goals, and activity charts.
+- **Bring your own cards.** Import CSV, TSV, text, or JSON files, paste spreadsheet rows or `Q:` / `A:` blocks, or import from a public card pack. Export decks as CSV or back up and restore your full library as JSON.
+- **Make it yours** with light and dark themes, English and Italian interface text, and optional locally generated sound cues.
+- **Keep learning offline.** After the first successful online load, the app shell and guest library are available offline on that device.
+
+## 🧭 How the app is structured
+
+Flashlang is a static frontend built with browser-native HTML, CSS, and JavaScript modules. It has no bundler or package-install step. The app can run as a guest without a backend; Supabase is an optional service for account authentication, private cloud libraries, and public pack importing.
+
+The main data model is a **library → classes → decks → cards** hierarchy. Each card stores its question, answer, confidence, review schedule, and optional starred state. Study activity and preferences live with the library.
+
+| Area | Files | Responsibility |
+| --- | --- | --- |
+| App and interface | `index.html`, `src/app.js`, `src/icons.js` | Page entry point, app state, navigation, library and study views, and interactions |
+| Library and study logic | `src/data.js`, `src/study.js`, `src/stats.js` | Example data, validation, review scheduling, card selection, and progress calculations |
+| Import, language, and sound | `src/importer.js`, `src/i18n.js`, `src/sounds.js` | Card file parsing and export, public pack URL validation, English/Italian interface copy, and sound feedback |
+| Cloud and offline support | `src/cloud.js`, `config.js`, `sw.js`, `manifest.webmanifest` | Optional Supabase access, public app-shell caching, and install metadata |
+| Presentation | `styles.css`, `design.css`, `themes.css` | Layout, visual design, and theme styles |
+| Backend and publishing | `supabase/`, `scripts/build.py`, `.github/workflows/` | Database schema and import function, packaging, and deployment |
+| Samples and checks | `samples/`, `tests/` | Example import files and automated/browser tests |
+
+## 🛠️ Run locally
+
+Serve the project over HTTP so the browser can load JavaScript modules:
 
 ```sh
-python3 -m http.server 5173
+npm run dev
 ```
 
-Open [localhost:5173](http://localhost:5173). Serve the files over HTTP; opening `index.html` directly will not load JavaScript modules correctly.
+Open [localhost:5173](http://localhost:5173). You can also run `python3 -m http.server 5173 --bind 127.0.0.1`. Opening `index.html` directly as a file will not work correctly.
 
-The interface uses a pale canvas, softly shaded lavender, blue, and coral cards, and translucent panels. Phone navigation stays within thumb reach, study cards flip on tap, and large confidence buttons keep sessions quick. Animations respect your device’s reduced-motion setting. Each card reviewed earns 10 XP, with levels every 500 XP and a daily quest based on your study goal. Rewards depend on practice, so ratings can stay honest.
-
-The Progress screen shows total reviews, study time, active days, strong cards, a 14-day activity chart, 12-week calendar, confidence distribution, and cards due or ready to learn. These statistics are calculated from the activity and card progress already saved with your library, including in your private account.
-
-The guest library starts with example decks. Create a class and deck, or use **Import cards** to upload CSV, TSV, TXT, or JSON (up to 5 MB), paste spreadsheet rows, or paste `Q:` / `A:` blocks. Choose a delimiter manually if detection reports an ambiguous file. The preview shows parsed cards before importing; duplicates already in the target deck are not added again. Sample files are in `samples/`.
-
-Study sessions prioritize due cards and unseen cards. Reveal an answer and rate your confidence from 1 to 5; weak cards return sooner. Study progress is saved after each rating. In Settings, you can set your daily goal, add the example classes, export a full JSON backup, or restore a backup. Individual decks can be exported as CSV.
-
-Use **Settings → Language** to switch the interface between English and Italian. Menus, study controls, statistics, and messages follow the selected language; your own class, deck, and card text is never translated. The choice is saved with your library and included in backups and account sync.
-
-## Install on your phone
-
-Open the [live site](https://andsumm.github.io/flashlang/) once while online. In Android Chrome, use **Install app** or **Add to Home screen** from the browser menu. On iPhone, open the site in Safari and use **Share → Add to Home Screen**. Flashlang then launches from its own icon in a standalone window.
-
-After the first successful online load, the app shell is available offline. You can reopen the app and use the guest library saved on that device, including imports, edits, and study. Signing in, loading an account library, and cloud synchronization require an internet connection. External web fonts are optional; system fonts are used when unavailable offline.
-
-The service worker caches only public interface files from this site's own path. Supabase requests, authentication responses, and other external requests are never cached by it. HTML, modules, CSS, and `config.js` use the network first, with cached files used when offline. Each packaged app version has a content-derived cache version, so a new deployment replaces its previous offline shell. See [MDN's PWA installation guide](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable).
-
-## Checks and project files
-
-With Node.js 22 or later installed, run the automated parser and scheduling checks with:
+Run the automated tests with Node.js 22 or later:
 
 ```sh
 npm test
 ```
 
-No `npm install` is needed. An additional browser-native check page is available at [localhost:5173/tests/run.html](http://localhost:5173/tests/run.html) while the local server is running. The GitHub deployment workflow checks JavaScript syntax and runs the automated tests before publishing.
+No `npm install` is needed. With the local server running, the browser-native check page is at [localhost:5173/tests/run.html](http://localhost:5173/tests/run.html).
 
-The app entry point is `src/app.js`, interface translations are in `src/i18n.js`, data validation and examples are in `src/data.js`, import/export handling is in `src/importer.js`, spaced repetition is in `src/study.js`, and dashboard calculations are in `src/stats.js`. The cloud adapter is `src/cloud.js`; presentation styles are in `styles.css` and `design.css`. Install metadata lives in `manifest.webmanifest`; `sw.js` provides the offline public shell. To regenerate the PNG icons from the existing flower geometry, run `python3 scripts/generate_icons.py` (no extra packages required).
+## 📥 Import and export
 
-## Accounts and private storage
+The import screen accepts CSV, TSV, semicolon- or pipe-separated text, JSON, and `Q:` / `A:` blocks. You can upload a file or paste content. Imports are previewed before they are added; CSV and TSV samples are in [`samples/`](./samples/). Each import can contain up to 10,000 cards, and each card side can contain up to 20,000 characters.
 
-The current site uses `https://noehfvtxghfpeyberpdb.supabase.co`. Email/password signup is enabled and **Confirm email** is off, so a new account can sign in immediately. Users' libraries are private database records protected by row-level security, independent of the client interface.
+To import text from a public Brainscape pack, paste its shared flashcard-pack URL. This optional feature uses a Supabase Edge Function because browsers cannot fetch the source page directly across origins. Only readable text is imported; images, audio, and private packs are not supported. Deploy the function to the Supabase project configured in `config.js`:
 
-To deploy a separate copy with your own backend:
-
-1. Create a project on [Supabase Free](https://supabase.com/pricing).
-2. Open the project's SQL Editor, paste the contents of `supabase/schema.sql`, and run it. It creates one library record per user, with row-level security restricting access to the signed-in owner.
-3. In Supabase Authentication, enable the Email provider. For the simplest personal setup, turn **Confirm email** off; users can create an account and sign in immediately with their email and password. If email confirmations are desired, keep them on and configure custom SMTP first.
-4. In Authentication → URL Configuration, set **Site URL** to your deployed URL, including the repository path and trailing slash. This deployment uses `https://andsumm.github.io/flashlang/`. Add the deployed URL and `http://localhost:5173/` to the allowed redirect URLs.
-5. Copy your project URL and **publishable key** (or legacy **anon public** key) into `config.js`:
-
-```js
-window.APP_CONFIG = {
-  supabaseUrl: 'https://YOUR-PROJECT.supabase.co',
-  supabaseAnonKey: 'YOUR-PUBLISHABLE-OR-ANON-KEY',
-};
+```sh
+supabase login
+supabase link --project-ref YOUR-PROJECT-REF
+supabase functions deploy
 ```
 
-The project URL and public key are intended to appear in browser code. Never use a `service_role` key, secret API key, database password, or account access token here. The SQL policies enforce access independently of the client UI. See [Supabase row-level security](https://supabase.com/docs/guides/database/postgres/row-level-security).
+Use Settings to export or restore a full JSON library backup. Individual decks can be exported as CSV.
 
-The Supabase JavaScript SDK is pinned and downloaded from esm.sh only when cloud accounts are configured. It manages persisted login sessions and token refresh. See [Supabase password authentication](https://supabase.com/docs/guides/auth/passwords).
+## 📱 Install and use offline
 
-### Confirmation and password-reset email
+Open the [live site](https://andsumm.github.io/flashlang/) once while online. In Android Chrome, choose **Install app** or **Add to Home screen** from the browser menu. On iPhone, open the site in Safari and choose **Share → Add to Home Screen**.
 
-Custom SMTP is not configured for the current site, so public password-reset email delivery is unavailable. Immediate email/password signup works because Confirm email is off. Supabase's default sender is limited to project team members and is intended for testing; confirmations and password resets for other addresses require [custom SMTP](https://supabase.com/docs/guides/auth/auth-smtp). Configure a provider's free allowance before enabling reset email for public users.
+After the first successful online load, the app shell is available offline. You can reopen Flashlang and use the guest library saved on that device, including imports, edits, and study. Signing in, loading a cloud library, and syncing require an internet connection. External fonts are optional; system fonts are used when they are unavailable.
 
-## Publish free on GitHub Pages
+The service worker caches only public interface files from this site's own path. It does not cache flashcards, authentication responses, or Supabase requests. New deployments receive a content-derived cache version so the offline shell can update.
 
-The current source repository is [andsumm/flashlang](https://github.com/andsumm/flashlang), with the GitHub Pages site at [andsumm.github.io/flashlang](https://andsumm.github.io/flashlang/). Changes pushed to `main` are checked and published by `.github/workflows/deploy.yml`.
+## ☁️ Optional accounts and cloud sync
 
-To publish a separate copy:
+Guest mode stores the library in browser storage on the current device. To enable accounts for another deployment, connect a Supabase project:
 
-1. Create a **public** repository on GitHub, for example `flashlang`, with `main` as its default branch. Public repositories support GitHub Pages on GitHub Free.
-2. Upload or push all the source files, including `.github/workflows/deploy.yml`. You can use GitHub's **Add file → Upload files**, or Git from a terminal.
-3. In the repository's **Settings → Pages**, select **GitHub Actions** as the source.
-4. Open **Actions → Deploy to GitHub Pages** and run it, or push another commit to `main`. The workflow packages the public files into `_site` and publishes them.
-5. Use the deployment URL shown in Actions or Settings → Pages. Set that URL in Supabase's Site URL and redirect allowlist as described above.
+1. Run [`supabase/schema.sql`](./supabase/schema.sql) in the project's SQL Editor. It creates a library table with row-level security so each signed-in user can access only their own library.
+2. Enable the Email provider in Supabase Authentication and configure the site's URL and allowed redirect URLs for your deployment and local development.
+3. Add the project URL and its public publishable key (or legacy anon public key) to `config.js`:
 
-All application asset and module paths are relative, so the same source works at a domain root and at `/<repository-name>/`. No custom domain is required. See [GitHub Pages custom workflows](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
+   ```js
+   window.APP_CONFIG = {
+     supabaseUrl: 'https://YOUR-PROJECT.supabase.co',
+     supabaseAnonKey: 'YOUR-PUBLISHABLE-OR-ANON-KEY',
+   };
+   ```
 
-To inspect exactly what is published:
+The URL and public key are intended for browser use. **Never** put a `service_role` key, secret API key, database password, or account access token in `config.js`. The database policies—not just the interface—enforce library privacy. See [Supabase row-level security](https://supabase.com/docs/guides/database/postgres/row-level-security).
+
+The Supabase JavaScript SDK is loaded only when cloud features are configured. Email confirmations and password-reset delivery depend on the authentication and email settings of the Supabase project.
+
+Each account's library is stored as one JSON document. Updates are saved as a whole; simultaneous edits from multiple devices use last-write-wins rather than collaborative merging. Browser storage is specific to a device and browser profile, so keep a JSON backup before clearing browser data or changing devices.
+
+## 🚀 Build and publish
+
+The app is published to GitHub Pages from this repository. Changes pushed to `main` are checked and deployed by the GitHub Actions workflow. To package and preview the public files locally:
 
 ```sh
 python3 scripts/build.py
 python3 -m http.server 4173 --directory _site
 ```
 
-The packaging script copies only the public app files and assets and injects the current public-file hash into `sw.js`. SQL, docs, tests, and local environment files are excluded. It does not bundle, minify, or download dependencies. Preview `_site` to check the exact production worker and manifest.
-
-## Cost and storage
-
-GitHub Pages hosts the static interface. Supabase Free provides the database and authentication, currently including 500 MB of database storage and 50,000 monthly active users. Free projects can pause after a week of inactivity; resume the project in Supabase if login or sync stops after a long break. Current allowances are documented on the [Supabase pricing page](https://supabase.com/pricing).
-
-Each account's complete library is saved as one JSON document. A write is atomic, but simultaneous edits from different devices use last-write-wins rather than collaborative merging. Use one active editing session at a time. GitHub hosts source code and the interface; private cards live in Supabase, not in the public repository.
-
-Guest libraries and account save recovery use local browser storage. Browser data is specific to the device and browser profile, so export a backup before clearing it or changing devices. The service worker's public shell cache contains no flashcards or account data.
+Open [localhost:4173](http://localhost:4173). The packaging script copies only public app files and assets into `_site`, then stamps the service worker with a content-derived version. It does not bundle, minify, or download dependencies. The relative asset paths allow the app to run at a domain root or under a repository path.

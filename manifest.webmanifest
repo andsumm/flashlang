@@ -7,8 +7,8 @@
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#eeedf0",
-  "theme_color": "#eeedf0",
+  "background_color": "#17161d",
+  "theme_color": "#17161d",
   "categories": [
     "education",
     "games"

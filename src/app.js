@@ -4,7 +4,8 @@ import { parseImport, toCsv } from './importer.js';
 import { scheduleReview, selectStudyCards, getMastery, dateKey } from './study.js';
 import { getStudyStats } from './stats.js';
 import { localize, translateText } from './i18n.js';
-import { isCloudConfigured, getCloudClient, getAuthRedirectUrl, loadCloudLibrary, saveCloudLibrary } from './cloud.js';
+import { createSoundFeedback } from './sounds.js';
+import { isCloudConfigured, getCloudClient, getAuthRedirectUrl, loadCloudLibrary, saveCloudLibrary, importBrainscapePack } from './cloud.js';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -23,6 +24,20 @@ let initialLibrary=readLocal();
 const state = {library:initialLibrary||exampleLibrary(),view:'library',classId:null,deckId:null,user:null,query:'',sort:'recent',filter:'all',mobile:false,cloudReady:false,cloudLoading:false,cloudError:'',sync:'local',dirty:false,revision:0,study:null,visibleCards:100,authMode:'login',importDraft:null};
 let toastTimer, cloudTimer, syncChain=Promise.resolve(), syncGeneration=0, authGeneration=0, lastFocus, boundUserId;
 let storageWarningShown=false;
+const sounds = createSoundFeedback();
+
+function soundButtonHtml() {
+  return `<button type="button" class="icon-btn sound-toggle" data-action="toggle-sound" aria-label="Sound feedback" aria-pressed="${sounds.enabled}" title="${sounds.enabled?'Mute sounds':'Unmute sounds'}">${icon(sounds.enabled?'volume':'muted')}</button>`;
+}
+function toggleSound() {
+  sounds.setEnabled(!sounds.enabled);
+  document.querySelectorAll('[data-action="toggle-sound"]').forEach(button=>{
+    button.innerHTML=icon(sounds.enabled?'volume':'muted');
+    button.setAttribute('aria-pressed',String(sounds.enabled));
+    button.title=translateText(sounds.enabled?'Mute sounds':'Unmute sounds',language());
+  });
+  if(sounds.enabled)sounds.play('tap');
+}
 
 const logo = `<svg class="brand-logo" viewBox="0 0 36 36" fill="none" aria-hidden="true"><path d="M18 3c5.5 0 7.2 6.1 7.2 7.8 1.7 0 7.8 1.7 7.8 7.2s-6.1 7.2-7.8 7.2c0 1.7-1.7 7.8-7.2 7.8s-7.2-6.1-7.2-7.8C9.1 25.2 3 23.5 3 18s6.1-7.2 7.8-7.2C10.8 9.1 12.5 3 18 3Z" stroke="#98cce8" stroke-width="1.7"/><path d="M18 11v14m-7-7h14" stroke="#98cce8" stroke-width="1.7"/><circle cx="27.5" cy="8.5" r="3.2" fill="#ee9568"/></svg>`;
 const allCards = () => state.library.classes.flatMap(c=>c.decks.flatMap(d=>d.cards));
@@ -34,6 +49,13 @@ const num = value => Number(value).toLocaleString(language()==='it'?'it-IT':'en'
 const dueCount = cards => cards.filter(c=>!c.confidence||!c.dueAt||Date.parse(c.dueAt)<=Date.now()).length;
 const language = () => state.library.settings.language || 'en';
 const reviewLabel = count => language()==='it'?`${count} ${count===1?'ripasso':'ripassi'}`:`${count} ${count===1?'review':'reviews'}`;
+
+function setTheme(value) {
+  const theme=value==='light'?'light':'dark';
+  document.documentElement.dataset.theme=theme;
+  $('meta[name="theme-color"]').content=theme==='light'?'#eeedf0':'#17161d';
+  try {localStorage.setItem('flashlang.theme',theme);} catch { /* Appearance still works without browser storage. */ }
+}
 
 function writeLocal() {
   try {localStorage.setItem(storageKey(state.user?.id),JSON.stringify({...state.library,_localSync:{dirty:state.user?state.dirty:false,revision:state.revision}}));return true;} catch {
@@ -72,6 +94,7 @@ function statusHtml() {
   return `<span class="cloud-status" id="cloud-status" title="${state.user?'Your private account library':'Sign in to sync cards across devices'}"><i class="status-dot ${state.sync==='synced'?'synced':state.sync==='error'?'error':''}"></i>${text}</span>`;
 }
 function toast(message, error=false) {
+  sounds.play(error?'error':'success');
   clearTimeout(toastTimer);$('#toast-root').innerHTML=`<div class="toast" role="status">${icon(error?'help':'check')}<span>${esc(translateText(message,language()))}</span></div>`;
   toastTimer=setTimeout(()=>$('#toast-root').replaceChildren(),error?6500:3500);
 }
@@ -111,7 +134,7 @@ function sidebarHtml() {
 }
 function topbarHtml() {
   const cls=currentClass();
-  return `<header class="topbar"><button class="mobile-toggle" data-action="toggle-menu" aria-label="Open menu">${icon('menu')}</button><div class="topbar-breadcrumb"><span>Your workspace</span>${icon('chevron')}<strong ${cls?'data-user-content="true"':''}>${esc(cls?.title||({progress:'My progress',settings:'Settings'}[state.view])||'My library')}</strong></div><label class="topbar-search">${icon('search')}<input id="global-search" type="search" placeholder="Find a flashcard…" aria-label="Search your library" value="${esc(state.query)}" autocomplete="off"><kbd>/</kbd></label>${statusHtml()}<span class="topbar-divider"></span><button class="topbar-help icon-btn" data-action="help" aria-label="A little help">${icon('help')}</button><button class="topbar-account" data-action="${state.user?'account':'login'}">${state.user?`<span class="avatar">${esc(state.user.email.slice(0,2).toUpperCase())}</span>`:'Log in'}</button></header>`;
+  return `<header class="topbar"><button class="mobile-toggle" data-action="toggle-menu" aria-label="Open menu">${icon('menu')}</button><div class="topbar-breadcrumb"><span>Your workspace</span>${icon('chevron')}<strong ${cls?'data-user-content="true"':''}>${esc(cls?.title||({progress:'My progress',settings:'Settings'}[state.view])||'My library')}</strong></div><label class="topbar-search">${icon('search')}<input id="global-search" type="search" placeholder="Find a flashcard…" aria-label="Search your library" value="${esc(state.query)}" autocomplete="off"><kbd>/</kbd></label>${statusHtml()}<span class="topbar-divider"></span>${soundButtonHtml()}<button class="topbar-help icon-btn" data-action="help" aria-label="A little help">${icon('help')}</button><button class="topbar-account" data-action="${state.user?'account':'login'}">${state.user?`<span class="avatar">${esc(state.user.email.slice(0,2).toUpperCase())}</span>`:'Log in'}</button></header>`;
 }
 function contentHtml() {
   if(state.cloudLoading)return `<div class="empty-state"><div class="empty-icon">${icon('cloud')}</div><h3>Getting your cards ready…</h3><p>Opening your private study space.</p></div>`;
@@ -141,7 +164,7 @@ function libraryHtml() {
 }
 function classCardHtml(cls) {
   const cards=classCards(cls), mastery=getMastery(cards);
-  return `<article class="class-card" style="${palette(cls.color)}"><div class="class-cover"><div class="cover-grain"></div><div class="cover-icon">${icon(cls.icon)}</div><span class="cover-category">${cls.icon==='globe'?'KEEP EXPLORING':cls.icon==='palette'?'STAY CURIOUS':'KEEP LEARNING'}</span></div><div class="class-card-body"><h3>${esc(cls.title)}</h3><p>${esc(cls.description||translateText('A new place for your next big idea.',language()))}</p><div class="class-card-meta"><span>${icon('book')}${cls.decks.length} ${cls.decks.length===1?'deck':'decks'}</span><span>${icon('cards')}${num(cards.length)} cards</span></div><div class="mastery-line"><span>Mastery</span><strong>${mastery}%</strong></div><div class="mastery-track"><span style="width:${mastery}%"></span></div><div class="class-card-footer"><span>${dueCount(cards)>0?`${num(dueCount(cards))} cards ready to study`:'Ready when you are'}</span>${icon('arrow')}</div></div><button class="class-card-link" data-action="class" data-id="${esc(cls.id)}" aria-label="Open ${esc(cls.title)}"></button></article>`;
+  return `<article class="class-card" style="${palette(cls.color)}"><div class="class-cover"><div class="cover-grain"></div><div class="cover-icon">${icon(cls.icon)}</div><div class="class-cover-copy"><h3 data-user-content="true">${esc(cls.title)}</h3><p data-user-content="true">${esc(cls.description||translateText('A new place for your next big idea.',language()))}</p></div></div><div class="class-card-body"><div class="class-card-meta"><span>${icon('book')}${cls.decks.length} ${cls.decks.length===1?'deck':'decks'}</span><span>${icon('cards')}${num(cards.length)} cards</span></div><div class="mastery-line"><span>Mastery</span><strong>${mastery}%</strong></div><div class="mastery-track"><span style="width:${mastery}%"></span></div><div class="class-card-footer"><span>${dueCount(cards)>0?`${num(dueCount(cards))} cards ready to study`:'Ready when you are'}</span>${icon('arrow')}</div></div><button class="class-card-link" data-action="class" data-id="${esc(cls.id)}" aria-label="Open ${esc(cls.title)}"></button></article>`;
 }
 function emptyHtml(title,description,label,action) {return `<div class="empty-state"><div class="empty-icon">${icon('cards')}</div><h3>${esc(title)}</h3><p>${esc(description)}</p>${label?`<button class="btn btn-primary" data-action="${action}">${icon('plus')}${esc(label)}</button>`:''}</div>`;}
 function classHtml() {
@@ -176,7 +199,8 @@ function progressHtml() {
   <div class="progress-grid progress-bottom"><section class="panel calendar-panel"><div class="panel-heading"><div><h3>Your consistency</h3><p>${num(stats.completedGoals)} daily goals reached · ${num(stats.activeDays)} active ${stats.activeDays===1?'day':'days'}</p></div><span class="panel-tag">12 WEEKS</span></div><div class="calendar-grid" role="img" aria-label="${esc(stats.last84Days.map(day=>`${day.date.toLocaleDateString(language()==='it'?'it-IT':'en',{month:'short',day:'numeric'})}: ${reviewLabel(day.count)}`).join(', '))}">${stats.last84Days.map(day=>`<span class="calendar-day" data-intensity="${day.count===0?0:day.count<stats.dailyGoal/2?1:day.count<stats.dailyGoal?2:3}" title="${esc(day.date.toLocaleDateString(language()==='it'?'it-IT':'en',{month:'short',day:'numeric'}))}: ${reviewLabel(day.count)}"></span>`).join('')}</div><div class="calendar-key"><span>Less</span><i data-intensity="0"></i><i data-intensity="1"></i><i data-intensity="2"></i><i data-intensity="3"></i><span>More</span></div></section><section class="panel focus-panel"><div class="panel-heading"><div><h3>Up next</h3><p>A good place to pick up today</p></div></div><div class="focus-count">${icon('target')}<div><strong>${focus}</strong><span>${stats.weakCards?`${num(stats.weakCards)} ${stats.weakCards===1?'card needs':'cards need'} extra practice`:'Your next session is ready when you are'}</span></div></div><div class="focus-breakdown"><span><b>${num(stats.dueCards)}</b> Due</span><span><b>${num(stats.newCards)}</b> New</span><span><b>${num(stats.weakCards)}</b> Tricky</span></div><button class="btn btn-blue focus-button" data-action="study-all">Start a session ${icon('arrow')}</button></section></div>${footerHtml()}`;
 }
 function settingsHtml() {
-  return `<div class="page-heading"><div><div class="eyebrow">MAKE YOURSELF AT HOME</div><h1>Your settings</h1><p>A study space that feels like yours.</p></div></div><div class="settings-stack"><section class="panel"><div class="settings-row"><div><h3>Your daily goal</h3><p>A manageable number of cards to keep the habit going.</p></div><label><span class="sr-only">Cards per day</span><input id="daily-goal" type="number" class="input" min="5" max="500" step="5" value="${state.library.settings.dailyGoal}"></label><button class="btn btn-secondary btn-sm" data-action="save-goal">Save goal</button></div></section>
+  return `<div class="page-heading"><div><div class="eyebrow">MAKE YOURSELF AT HOME</div><h1>Your settings</h1><p>A study space that feels like yours.</p></div></div><div class="settings-stack"><section class="panel"><div class="settings-row"><div><h3>Appearance</h3><p>Choose a light or dark appearance for this device.</p></div><label><span class="sr-only">Theme</span><select id="theme-select" class="input theme-select"><option value="dark" ${document.documentElement.dataset.theme!=='light'?'selected':''}>Dark</option><option value="light" ${document.documentElement.dataset.theme==='light'?'selected':''}>Light</option></select></label></div></section>
+  <section class="panel"><div class="settings-row"><div><h3>Your daily goal</h3><p>A manageable number of cards to keep the habit going.</p></div><label><span class="sr-only">Cards per day</span><input id="daily-goal" type="number" class="input" min="5" max="500" step="5" value="${state.library.settings.dailyGoal}"></label><button class="btn btn-secondary btn-sm" data-action="save-goal">Save goal</button></div></section>
   <section class="panel"><div class="settings-row"><div><h3>Language</h3><p>Choose the language used for menus, buttons, and study controls.</p></div><label><span class="sr-only">Language</span><select id="language-select" class="input language-select"><option value="en" ${language()==='en'?'selected':''}>English</option><option value="it" ${language()==='it'?'selected':''}>Italiano</option></select></label></div></section>
   <section class="panel"><div class="settings-row"><div><h3>${state.user?'Your account':'Take your cards with you'}</h3><p>${state.user?`<span data-user-content="true">${esc(state.user.email)}</span> · <span>${state.sync==='synced'?'Your private library is synced.':'Your library is saved on this device.'}</span>`:'Sign in with your email and password to sync your library across devices.'}</p></div><button class="btn btn-secondary btn-sm" data-action="${state.user?'account':'login'}">${icon(state.user?'user':'cloud')}${state.user?'Manage account':'Log in or sign up'}</button></div>${state.sync==='error'?`<div class="settings-warning">Cloud sync needs attention. Your local copy is safe.<button class="btn btn-secondary btn-sm" style="margin-left:10px" data-action="retry-sync">Retry sync</button></div>`:''}</section>
   <section class="panel"><div class="settings-row"><div><h3>A copy for safekeeping</h3><p>Download all your classes, cards, and progress as a Flashlang backup.</p></div><button class="btn btn-secondary btn-sm" data-action="backup">${icon('download')}Export backup</button></div></section><section class="panel"><div class="settings-row"><div><h3>Bring your library back</h3><p>Restore a Flashlang JSON backup. You’ll review the details before replacing your library.</p></div><label class="btn btn-secondary btn-sm" tabindex="0">${icon('upload')}Choose backup<input class="backup-restore-input" id="restore-file" type="file" accept=".json,application/json"></label></div></section>
@@ -191,8 +215,8 @@ function showModal(title,subtitle,body,{wide=false,cls=''}={}) {
   requestAnimationFrame(()=>{const target=$('#modal-root input:not([type=hidden]):not([type=file]), #modal-root textarea, #modal-root .btn');(target||$('#modal-root .icon-btn'))?.focus();});
 }
 function closeModal() {$('#modal-root').replaceChildren();document.body.style.overflow='';if(lastFocus?.isConnected)lastFocus.focus();}
-function modalError(message) {let node=$('#modal-error');if(!node){node=document.createElement('div');node.id='modal-error';node.className='form-error';node.setAttribute('role','alert');$('#modal-root form, #modal-root .modal-body')?.append(node);}node.hidden=false;node.textContent=translateText(message,language());}
-function modalSuccess(message) {const node=$('#modal-success');if(node){node.textContent=translateText(message,language());node.hidden=false;}else{const p=document.createElement('p');p.className='form-success';p.role='status';p.textContent=translateText(message,language());$('#modal-root .modal-body').append(p);}}
+function modalError(message) {sounds.play('error');let node=$('#modal-error');if(!node){node=document.createElement('div');node.id='modal-error';node.className='form-error';node.setAttribute('role','alert');$('#modal-root form, #modal-root .modal-body')?.append(node);}node.hidden=false;node.textContent=translateText(message,language());}
+function modalSuccess(message) {sounds.play('success');const node=$('#modal-success');if(node){node.textContent=translateText(message,language());node.hidden=false;}else{const p=document.createElement('p');p.className='form-success';p.role='status';p.textContent=translateText(message,language());$('#modal-root .modal-body').append(p);}}
 function classModal(edit=false) {
   const cls=edit?currentClass():null;
   showModal(edit?'A little fine-tuning.':'A new place to learn.',edit?'Make this class feel like yours.':'Group your decks around a subject, a goal, or a big idea.',`<form id="class-form" data-edit="${edit}"><div class="form-group"><label class="label" for="class-title">Class name</label><input class="input" id="class-title" name="title" placeholder="e.g. Italian essentials" value="${esc(cls?.title||'')}" maxlength="200" required></div><div class="form-group"><label class="label" for="class-description">A little description <span class="muted">(optional)</span></label><input class="input" id="class-description" name="description" placeholder="What are you curious about?" value="${esc(cls?.description||'')}" maxlength="1000"></div><div class="form-group"><span class="label">Choose a color</span><input type="hidden" id="class-color" name="color" value="${cls?.color||'blue'}"><div class="color-options">${Object.entries(colors).map(([name,c])=>`<button type="button" class="color-option ${(cls?.color||'blue')===name?'selected':''}" data-action="choose-color" data-color="${name}" style="--accent:${c.accent}" aria-label="${name}" aria-pressed="${(cls?.color||'blue')===name}">${(cls?.color||'blue')===name?icon('check'):''}</button>`).join('')}</div></div><div id="modal-error" class="form-error" role="alert" hidden></div><div class="form-actions">${edit?'<button type="button" class="btn btn-danger btn-sm" data-action="delete-class">Delete class</button>':''}<button type="button" class="btn btn-quiet" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">${edit?'Save changes':'Create class'}${icon('arrow')}</button></div></form>`);
@@ -211,9 +235,28 @@ function confirmModal(title,description,onConfirm,label='Delete') {
   $('#confirm-action').addEventListener('click',()=>{onConfirm();closeModal();});
 }
 function importModal(reuse=false) {
-  if(!reuse)state.importDraft={text:'',format:'auto',classId:currentClass()?.id||state.library.classes[0]?.id||'__new__',deckTitle:translateText('Imported cards',language()),newClassTitle:'',append:Boolean(currentDeck()),filename:''};
+  if(!reuse)state.importDraft={text:'',format:'auto',classId:currentClass()?.id||state.library.classes[0]?.id||'__new__',deckTitle:translateText('Imported cards',language()),newClassTitle:'',append:Boolean(currentDeck()),filename:'',brainscapeUrl:'',brainscapeWarnings:[]};
   const draft=state.importDraft;
-  showModal('Good cards. A fresh start.','Bring your flashcards over. We’ll make sure everything looks right before importing.',`<form id="import-form"><label class="file-drop" id="file-drop">${icon('upload')}<strong id="file-drop-text">${draft.filename?esc(draft.filename):'Choose a file, or drop it here'}</strong><small>CSV, TSV, TXT, or JSON · up to 5 MB</small><input id="import-file" type="file" accept=".csv,.tsv,.txt,.json,text/csv,text/tab-separated-values,text/plain,application/json" aria-label="Choose a flashcard file"></label><div class="import-or">OR PASTE YOUR CARDS</div><label class="sr-only" for="import-text">Flashcard text</label><textarea class="input import-text" id="import-text" name="text" spellcheck="false" placeholder="${language()==='it'?'Domanda,Risposta&#10;Quanto fa 2+2?,4&#10;Qual è la capitale d’Italia?,Roma':'Question,Answer&#10;What does buongiorno mean?,Good morning&#10;How do you say thank you?,Grazie'}">${esc(draft.text)}</textarea><div class="import-tools"><a href="./samples/cards.csv" download>Download an example CSV ${icon('download')}</a><label><span class="sr-only">Import format</span><select id="import-format"><option value="auto">Detect format automatically</option><option value="csv">Comma separated (CSV)</option><option value="tsv">Tab separated (TSV)</option><option value="semicolon">Semicolon separated</option><option value="pipe">Pipe separated</option><option value="json">JSON</option><option value="qa">Q: / A: blocks</option></select></label></div><div class="two-col"><div class="form-group"><label class="label" for="import-class">Add to class</label><select class="input" id="import-class">${state.library.classes.map(c=>`<option value="${esc(c.id)}" ${draft.classId===c.id?'selected':''}>${esc(c.title)}</option>`).join('')}<option value="__new__" ${draft.classId==='__new__'?'selected':''}>+ Create a new class</option></select></div><div class="form-group"><label class="label" for="import-deck-title">New deck name</label><input class="input" id="import-deck-title" value="${esc(draft.deckTitle)}" maxlength="200" ${draft.append?'disabled':''}></div></div><div class="form-group" id="import-new-class-group" ${draft.classId!=='__new__'?'hidden':''}><label class="label" for="import-new-class">New class name</label><input class="input" id="import-new-class" placeholder="e.g. Languages" value="${esc(draft.newClassTitle)}" maxlength="200"></div>${currentDeck()?`<label class="small muted" style="display:flex;align-items:center;gap:8px;line-height:1.7"><input type="checkbox" id="import-append" ${draft.append?'checked':''}>Add to the current deck (${esc(currentDeck().title)})</label>`:''}<div class="field-hint" style="margin-top:17px">One question and answer per row. Paste directly from a spreadsheet, an Anki text export, or a two-column list. Quoted, multiline CSV fields are supported.</div><div id="modal-error" class="form-error" role="alert" hidden></div><div class="form-actions"><button class="btn btn-quiet" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Preview cards ${icon('arrow')}</button></div></form>`,{wide:true});
+  showModal('Good cards. A fresh start.','Bring your flashcards over. We’ll make sure everything looks right before importing.',`
+    <form id="import-form">
+      <label class="file-drop" id="file-drop">${icon('upload')}<strong id="file-drop-text">${draft.filename?esc(draft.filename):'Choose a file, or drop it here'}</strong><small>CSV, TSV, TXT, or JSON · up to 5 MB</small><input id="import-file" type="file" accept=".csv,.tsv,.txt,.json,text/csv,text/tab-separated-values,text/plain,application/json" aria-label="Choose a flashcard file"></label>
+      <div class="import-or">OR IMPORT A PUBLIC BRAINSCAPE PACK</div>
+      <div class="form-group">
+        <label class="label" for="brainscape-url">Brainscape pack URL</label>
+        <div class="brainscape-import-row"><input class="input" type="url" id="brainscape-url" placeholder="https://www.brainscape.com/flashcards/.../packs/123" value="${esc(draft.brainscapeUrl)}"><button class="btn btn-secondary" type="button" data-action="load-brainscape">Load pack</button></div>
+        <p class="field-hint" id="brainscape-status" role="status">${draft.brainscapeLoaded?`${num(draft.brainscapeCount)} cards loaded from ${esc(draft.brainscapeTitle)}.`:''}</p>
+      </div>
+      <div class="import-or">OR PASTE YOUR CARDS</div>
+      <label class="sr-only" for="import-text">Flashcard text</label>
+      <textarea class="input import-text" id="import-text" name="text" spellcheck="false" placeholder="${language()==='it'?'Domanda,Risposta&#10;Quanto fa 2+2?,4&#10;Qual è la capitale d’Italia?,Roma':'Question,Answer&#10;What does buongiorno mean?,Good morning&#10;How do you say thank you?,Grazie'}">${esc(draft.text)}</textarea>
+      <div class="import-tools"><a href="./samples/cards.csv" download>Download an example CSV ${icon('download')}</a><label><span class="sr-only">Import format</span><select id="import-format"><option value="auto">Detect format automatically</option><option value="csv">Comma separated (CSV)</option><option value="tsv">Tab separated (TSV)</option><option value="semicolon">Semicolon separated</option><option value="pipe">Pipe separated</option><option value="json">JSON</option><option value="qa">Q: / A: blocks</option></select></label></div>
+      <div class="two-col"><div class="form-group"><label class="label" for="import-class">Add to class</label><select class="input" id="import-class">${state.library.classes.map(c=>`<option value="${esc(c.id)}" ${draft.classId===c.id?'selected':''}>${esc(c.title)}</option>`).join('')}<option value="__new__" ${draft.classId==='__new__'?'selected':''}>+ Create a new class</option></select></div><div class="form-group"><label class="label" for="import-deck-title">New deck name</label><input class="input" id="import-deck-title" value="${esc(draft.deckTitle)}" maxlength="200" ${draft.append?'disabled':''}></div></div>
+      <div class="form-group" id="import-new-class-group" ${draft.classId!=='__new__'?'hidden':''}><label class="label" for="import-new-class">New class name</label><input class="input" id="import-new-class" placeholder="e.g. Languages" value="${esc(draft.newClassTitle)}" maxlength="200"></div>
+      ${currentDeck()?`<label class="small muted" style="display:flex;align-items:center;gap:8px;line-height:1.7"><input type="checkbox" id="import-append" ${draft.append?'checked':''}>Add to the current deck (${esc(currentDeck().title)})</label>`:''}
+      <div class="field-hint" style="margin-top:17px">One question and answer per row. Paste directly from a spreadsheet, an Anki text export, or a two-column list. Quoted, multiline CSV fields are supported.</div>
+      <div id="modal-error" class="form-error" role="alert" hidden></div>
+      <div class="form-actions"><button class="btn btn-quiet" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Preview cards ${icon('arrow')}</button></div>
+    </form>`,{wide:true});
   $('#import-format').value=draft.format;
   const drop=$('#file-drop');
   drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('dragging');});
@@ -226,6 +269,7 @@ async function loadImportFile(file) {
   const generation=authGeneration,draft=state.importDraft;
   try {
     const content=await file.text();if(!$('#import-text')||authGeneration!==generation||state.importDraft!==draft)return;
+    draft.brainscapeLoaded=false;draft.brainscapeWarnings=[];
     $('#import-text').value=content;$('#file-drop-text').textContent=file.name;
     const extension=file.name.split('.').pop().toLowerCase();$('#import-format').value=['csv','tsv','json'].includes(extension)?extension:'auto';
     state.importDraft.filename=file.name;
@@ -233,14 +277,36 @@ async function loadImportFile(file) {
     $('#modal-error').hidden=true;
   }catch{modalError('This file couldn’t be read. Try copying and pasting the text instead.');}
 }
+async function loadBrainscapePack() {
+  const draft=state.importDraft,url=$('#brainscape-url').value.trim(),button=$('[data-action="load-brainscape"]');
+  if(!url)return modalError('Paste a public Brainscape pack URL.');
+  draft.brainscapeUrl=url;
+  button.disabled=true;button.textContent='Loading…';
+  try {
+    const pack=await importBrainscapePack(url);
+    if(!$('#import-text')||state.importDraft!==draft)return;
+    draft.text=JSON.stringify({cards:pack.cards},null,2);draft.format='json';
+    draft.brainscapeTitle=pack.title;draft.brainscapeCount=pack.cards.length;draft.brainscapeLoaded=true;draft.brainscapeWarnings=pack.warnings;
+    $('#import-text').value=draft.text;$('#import-format').value='json';
+    if(!draft.append&&($('#import-deck-title').value===translateText('Imported cards',language())||!$('#import-deck-title').value.trim()))$('#import-deck-title').value=pack.title;
+    $('#brainscape-status').textContent=translateText(`${num(pack.cards.length)} cards loaded from ${pack.title}.`,language());
+    $('#modal-error').hidden=true;
+  } catch(error) {
+    modalError(error.message);
+  } finally {
+    if(button.isConnected){button.disabled=false;button.textContent='Load pack';}
+  }
+}
 function previewImport() {
   const draft=state.importDraft;
-  Object.assign(draft,{text:$('#import-text').value,format:$('#import-format').value,classId:$('#import-class').value,deckTitle:$('#import-deck-title').value.trim(),newClassTitle:$('#import-new-class').value.trim(),append:$('#import-append')?.checked||false});
+  Object.assign(draft,{text:$('#import-text').value,format:$('#import-format').value,classId:$('#import-class').value,deckTitle:$('#import-deck-title').value.trim(),newClassTitle:$('#import-new-class').value.trim(),append:$('#import-append')?.checked||false,brainscapeUrl:$('#brainscape-url').value.trim()});
   if(draft.append)draft.classId=state.classId;
   if(draft.classId==='__new__'&&!draft.newClassTitle)return modalError('Give your new class a name.');
   if(!draft.append&&!draft.deckTitle)return modalError('Give your new deck a name.');
   if(draft.text.length>5*1024*1024)return modalError('This import is too large. Please keep it under 5 MB.');
   try{draft.parsed=parseImport(draft.text,draft.format);}catch(error){modalError(error.message);return;}
+  draft.parsed.warnings.push(...draft.brainscapeWarnings);
+  if(draft.brainscapeLoaded)draft.parsed.format='Brainscape';
   const seen=new Set(draft.append?(currentDeck()?.cards||[]).map(c=>JSON.stringify([c.question,c.answer])):[]);
   const originalCount=draft.parsed.cards.length;
   draft.parsed.cards=draft.parsed.cards.filter(c=>{const key=JSON.stringify([c.question,c.answer]);if(seen.has(key))return false;seen.add(key);return true;});
@@ -307,6 +373,7 @@ function startStudy(scope='all',id=null) {
   const items=selected.map(card=>byId.get(card.id));
   if(!items.length)return toast('You’re all caught up. Come back a little later.');
   state.study={items,index:0,revealed:false,ratings:[],seconds:0,lastReviewAt:Date.now(),scope,scopeId:id,title:scope==='deck'?items[0].deck.title:scope==='class'?items[0].cls.title:translateText('A little of everything',language()),subtitle:scope==='deck'?items[0].cls.title:translateText('Your personal study session',language())};
+  sounds.play('start');
   closeModal();render();window.scrollTo({top:0,behavior:'instant'});
 }
 function studyCard() {const s=state.study;return s&&s.index<s.items.length?s.items[s.index].deck.cards.find(c=>c.id===s.items[s.index].card.id):null;}
@@ -320,7 +387,7 @@ function renderStudy() {
   if(!done&&!card){s.index++;return renderStudy();}
   const content=card?(s.revealed?card.answer:card.question):'';
   const answerHasNote=s.revealed&&/\n\s*\n/.test(content);
-  $('#app').innerHTML=`<div class="study-layout"><header class="study-topbar"><button class="back-link" data-action="exit-study" aria-label="Back to library">${icon('back')}<span>Back to library</span></button><div class="study-title"><strong>${esc(s.title)}</strong><span>${esc(s.subtitle)}</span></div><span class="study-session-count">${s.ratings.length?'<b class="session-xp">+'+(s.ratings.length*10)+' XP</b>':''}${done?'Session complete':`${s.index+1} / ${s.items.length}`}</span></header><main id="main" class="session-main" tabindex="-1">${done?summaryHtml():`<div class="session-progress"><div class="mastery-track"><span style="width:${s.index/s.items.length*100}%;background:#79b0ce"></span></div><span>${Math.round(s.index/s.items.length*100)}%</span></div><article class="flashcard" aria-live="polite"><div class="flashcard-top"><span class="flashcard-side"><b>${s.revealed?'A':'Q'}</b>${s.revealed?'THE ANSWER':'A LITTLE CHALLENGE'}</span><button class="icon-btn ${card.starred?'starred':''}" data-action="star-study" aria-label="${card.starred?'Unstar this card':'Star this card'}" aria-pressed="${card.starred}">${icon('star')}</button></div>${s.revealed?`<div class="card-content ${content.length>180?'long-text':''} ${answerHasNote?'has-note':''}">${answerMarkup(content)}</div>`:`<button class="card-content flashcard-tap ${content.length>180?'long-text':''}" data-action="reveal" aria-label="${esc(content)}. Tap to reveal the answer.">${esc(content)}</button>`}${s.revealed?`<div class="answer-divider">${esc(card.question)}</div>`:''}<div class="flashcard-bottom"><span>${esc(s.items[s.index].deck.title)}</span><span>${card.reviewCount?'Seen '+card.reviewCount+' '+(card.reviewCount===1?'time':'times'):'A new little discovery'}</span></div></article><div class="study-controls">${s.revealed?`<p class="rating-question">How well did you know it?</p><div class="rating-buttons">${[1,2,3,4,5].map(r=>`<button class="rating-button" style="--rate:${rates[r]}" data-action="rate" data-rating="${r}" aria-label="${r}: ${rateLabels[r]}"><b>${r}</b><span>${rateLabels[r]}</span></button>`).join('')}</div><p class="keyboard-hint">Press <kbd>1</kbd>–<kbd>5</kbd> to rate your confidence</p>`:`<button class="btn btn-blue reveal-btn" data-action="reveal">Reveal answer ${icon('flip')}</button><p class="keyboard-hint">Press <kbd>Space</kbd> to reveal the answer</p>`}</div>`}</main><footer class="study-footer">${icon('leaf')}A little effort today. A little more knowledge tomorrow.<br>Your progress is saved as you go.</footer></div>`;
+  $('#app').innerHTML=`<div class="study-layout"><header class="study-topbar"><button class="back-link" data-action="exit-study" aria-label="Back to library">${icon('back')}<span>Back to library</span></button><div class="study-title"><strong>${esc(s.title)}</strong><span>${esc(s.subtitle)}</span></div><div class="study-header-actions"><span class="study-session-count">${s.ratings.length?'<b class="session-xp">+'+(s.ratings.length*10)+' XP</b>':''}${done?'Session complete':`${s.index+1} / ${s.items.length}`}</span>${soundButtonHtml()}</div></header><main id="main" class="session-main" tabindex="-1">${done?summaryHtml():`<div class="session-progress"><div class="mastery-track"><span style="width:${s.index/s.items.length*100}%;background:#79b0ce"></span></div><span>${Math.round(s.index/s.items.length*100)}%</span></div><article class="flashcard" aria-live="polite"><div class="flashcard-top"><span class="flashcard-side"><b>${s.revealed?'A':'Q'}</b>${s.revealed?'THE ANSWER':'A LITTLE CHALLENGE'}</span><button class="icon-btn ${card.starred?'starred':''}" data-action="star-study" aria-label="${card.starred?'Unstar this card':'Star this card'}" aria-pressed="${card.starred}">${icon('star')}</button></div>${s.revealed?`<div class="card-content ${content.length>180?'long-text':''} ${answerHasNote?'has-note':''}">${answerMarkup(content)}</div>`:`<button class="card-content flashcard-tap ${content.length>180?'long-text':''}" data-action="reveal" aria-label="${esc(content)}. Tap to reveal the answer.">${esc(content)}</button>`}${s.revealed?`<div class="answer-divider">${esc(card.question)}</div>`:''}<div class="flashcard-bottom"><span>${esc(s.items[s.index].deck.title)}</span><span>${card.reviewCount?'Seen '+card.reviewCount+' '+(card.reviewCount===1?'time':'times'):'A new little discovery'}</span></div></article><div class="study-controls">${s.revealed?`<p class="rating-question">How well did you know it?</p><div class="rating-buttons">${[1,2,3,4,5].map(r=>`<button class="rating-button" style="--rate:${rates[r]}" data-action="rate" data-rating="${r}" aria-label="${r}: ${rateLabels[r]}"><b>${r}</b><span>${rateLabels[r]}</span></button>`).join('')}</div><p class="keyboard-hint">Press <kbd>1</kbd>–<kbd>5</kbd> to rate your confidence</p>`:`<button class="btn btn-blue reveal-btn" data-action="reveal">Reveal answer ${icon('flip')}</button><p class="keyboard-hint">Press <kbd>Space</kbd> to reveal the answer</p>`}</div>`}</main><footer class="study-footer">${icon('leaf')}A little effort today. A little more knowledge tomorrow.<br>Your progress is saved as you go.</footer></div>`;
   localize($('#app'),language());
 }
 let studyTransition=false;
@@ -344,11 +411,13 @@ async function transitionStudy(change, kind='next') {
   } finally {studyTransition=false;}
 }
 function revealAnswer() {
-  if(!state.study||state.study.revealed||!studyCard())return;
+  if(studyTransition||!state.study||state.study.revealed||!studyCard())return;
+  sounds.play('reveal');
   return transitionStudy(()=>{state.study.revealed=true;renderStudy();},'reveal');
 }
 function rateAnswer(rating) {
-  if(!state.study?.revealed)return;
+  if(studyTransition||!state.study?.revealed||!Number.isInteger(rating)||rating<1||rating>5)return;
+  sounds.play('rate');
   return transitionStudy(()=>reviewCard(rating));
 }
 function reviewCard(rating) {
@@ -358,7 +427,7 @@ function reviewCard(rating) {
   const seconds=Math.min(300,Math.max(1,Math.round((Date.now()-s.lastReviewAt)/1000)));s.seconds+=seconds;s.lastReviewAt=Date.now();
   let activity=state.library.activity.find(a=>a.date===dateKey(now));if(!activity){activity={id:newId(),date:dateKey(now),cards:0,seconds:0};state.library.activity.push(activity);}activity.cards++;activity.seconds+=seconds;
   s.ratings.push(rating);navigator.vibrate?.(10);s.index++;s.revealed=false;persist();renderStudy();
-  if(s.index>=s.items.length)queueCloudSave();
+  if(s.index>=s.items.length){sounds.play('complete');queueCloudSave();}
 }
 function summaryHtml() {
   const s=state.study,count=s.ratings.length,average=count?s.ratings.reduce((a,b)=>a+b,0)/count:0;
@@ -435,6 +504,7 @@ async function restoreFile(file) {
 }
 
 const actions = {
+  'toggle-sound':toggleSound,
   library:()=>navigate(),progress:()=>navigate('progress'),settings:()=>navigate('settings'),class:el=>{state.filter='all';navigate('class',el.dataset.id);},deck:el=>{state.filter='all';navigate('deck',state.classId,el.dataset.id);},
   'search-result':el=>navigate('deck',el.dataset.class,el.dataset.id),'clear-search':()=>{state.query='';$('#global-search').value='';renderContent();},
   'toggle-menu':()=>{state.mobile=!state.mobile;render();},'new-class':()=>classModal(),'edit-class':()=>classModal(true),'new-deck':()=>deckModal(),'edit-deck':()=>deckModal(true),'new-card':()=>cardModal(),'edit-card':el=>cardModal(el.dataset.id),
@@ -445,7 +515,7 @@ const actions = {
   'star-card':el=>{const card=currentDeck()?.cards.find(c=>c.id===el.dataset.id);if(card){card.starred=!card.starred;persist();renderContent();}},
   'star-study':()=>{const card=studyCard();if(card){card.starred=!card.starred;persist();renderStudy();}},
   'more-cards':()=>{state.visibleCards+=100;renderContent();},
-  import:()=>importModal(),'import-back':()=>importModal(true),'confirm-import':finishImport,
+  import:()=>importModal(),'import-back':()=>importModal(true),'confirm-import':finishImport,'load-brainscape':loadBrainscapePack,
   login:()=>authModal(),'signup':()=>authModal('signup'),'forgot-password':()=>authModal('forgot'),account:accountModal,logout,
   'settings-from-modal':()=>{closeModal();navigate('settings');},'close-modal':closeModal,help:helpModal,
   'study-all':()=>startStudy(),'study-class':()=>startStudy('class',state.classId),'study-deck':el=>startStudy('deck',el.dataset.id||state.deckId),
@@ -460,7 +530,7 @@ const actions = {
 
 document.addEventListener('click',event=>{
   const el=event.target.closest('[data-action]');
-  if(el){const action=el.dataset.action;if(actions[action]){event.preventDefault();if((state.cloudLoading||state.cloudError)&&['new-class','edit-class','new-deck','edit-deck','new-card','edit-card','import','backup','add-examples','save-goal'].includes(action))return toast('Load your account library before making changes.',true);Promise.resolve(actions[action](el)).catch(error=>toast(error.message||'Something went wrong. Please try again.',true));}}
+  if(el){const action=el.dataset.action;if(actions[action]){event.preventDefault();if((state.cloudLoading||state.cloudError)&&['new-class','edit-class','new-deck','edit-deck','new-card','edit-card','import','backup','add-examples','save-goal'].includes(action))return toast('Load your account library before making changes.',true);if(!['toggle-sound','study-all','study-class','study-deck','study-again','reveal','rate'].includes(action))sounds.play('tap');Promise.resolve(actions[action](el)).catch(error=>toast(error.message||'Something went wrong. Please try again.',true));}}
   else if(event.target.matches('[data-backdrop]'))closeModal();
 });
 document.addEventListener('submit',event=>{
@@ -485,9 +555,13 @@ document.addEventListener('submit',event=>{
     if(form.id==='auth-form')handleAuth(form);
   }catch(error){modalError(error.message);}
 });
-document.addEventListener('input',event=>{if(event.target.id==='global-search'){state.query=event.target.value;renderContent();}});
+document.addEventListener('input',event=>{
+  if(event.target.id==='global-search'){state.query=event.target.value;renderContent();}
+  if(event.target.id==='import-text'&&state.importDraft?.brainscapeLoaded){state.importDraft.brainscapeLoaded=false;state.importDraft.brainscapeWarnings=[];$('#brainscape-status').textContent='';}
+});
 document.addEventListener('change',event=>{
   const el=event.target;
+  if(el.id==='theme-select'){setTheme(el.value);return;}
   if(el.id==='language-select'){state.library.settings.language=el.value==='it'?'it':'en';persist();render();return;}
   if(el.id==='class-sort'){state.sort=el.value;renderContent();}
   if(el.id==='card-filter'){state.filter=el.value;state.visibleCards=100;renderContent();}
@@ -508,7 +582,7 @@ document.addEventListener('keydown',event=>{
   else if(event.key==='/'&&!event.metaKey&&!event.ctrlKey){event.preventDefault();$('#global-search')?.focus();}
   else if(event.key==='Escape'&&state.mobile){state.mobile=false;render();}
 });
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&state.user&&state.sync==='saving')queueCloudSave();});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){sounds.stop();if(state.user&&state.sync==='saving')queueCloudSave();}});
 window.addEventListener('online',()=>{if(state.user&&state.sync==='error')queueCloudSave();});
 window.addEventListener('beforeunload',event=>{if(state.user&&state.sync==='saving'){event.preventDefault();event.returnValue='';}});
 

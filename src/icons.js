@@ -33,6 +33,8 @@ const paths = {
   leaf: '<path d="M20 3C8 2 2 8 5 16c8 5 16-2 15-13ZM4 21 16 8"/>',
   palette: '<path d="M12 3a9 9 0 1 0 0 18h2a2 2 0 0 0 1-4 2 2 0 0 1 1-4h2a3 3 0 0 0 3-3c0-4-4-7-9-7Z"/><path d="M7 9h.01M12 6h.01M17 9h.01M6 14h.01"/>',
   play: '<path d="m9 5 11 7-11 7Z"/>',
+  volume: '<path d="m11 4-6 5H2v6h3l6 5Z"/><path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>',
+  muted: '<path d="m11 4-6 5H2v6h3l6 5Z"/><path d="m16 9 6 6m-6 0 6-6"/>',
   spark: '<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z"/>',
   shuffle: '<path d="m17 3 4 4-4 4M3 17l4-4m10 0 4 4-4 4M3 7h3l12 10h3M10 10l5-3h6"/>',
   flip: '<path d="M20 7h-6m6 0V1m0 6A9 9 0 1 0 21 15"/>',
