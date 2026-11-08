@@ -6,6 +6,7 @@ import { getStudyStats } from './stats.js';
 import { localize, translateText } from './i18n.js';
 import { createSoundFeedback } from './sounds.js';
 import { isCloudConfigured, getCloudClient, getAuthRedirectUrl, loadCloudLibrary, loadPublicCourses, saveCloudLibrary, importBrainscapePack } from './cloud.js';
+import { loadCachedPublicCourses, mergeCachedCourse, saveCachedPublicCourse } from './offline-courses.js';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -122,6 +123,7 @@ function toast(message, error=false) {
 function navigate(view='library', classId=null, deckId=null) {
   state.view=view;state.classId=classId;state.deckId=deckId;state.mobile=false;state.query='';state.visibleCards=100;
   render();window.scrollTo({top:0,behavior:'instant'});
+  if(view==='class')cachePublicCourse(currentClass());
 }
 function render() {
   if(state.study){renderStudy();return;}
@@ -193,7 +195,9 @@ function classCardHtml(cls) {
 function emptyHtml(title,description,label,action) {return `<div class="empty-state"><div class="empty-icon">${icon('cards')}</div><h3>${esc(title)}</h3><p>${esc(description)}</p>${label?`<button class="btn btn-primary" data-action="${action}">${icon('plus')}${esc(label)}</button>`:''}</div>`;}
 function classHtml() {
   const cls=currentClass(),cards=classCards(cls),communityClass=isCommunityClass(cls);
-  return `<button class="back-link" data-action="library">${icon('back')}Back to my library</button><div class="class-header" style="${palette(cls.color)}"><div class="cover-icon">${icon(cls.icon)}</div><div><h1>${esc(cls.title)}</h1><p>${esc(cls.description||translateText('One card closer to knowing it by heart.',language()))}</p>${communityClass?'<span class="field-hint">Public course · read-only</span>':''}</div><div class="heading-actions">${communityClass?'':`<button class="btn btn-secondary" data-action="edit-class">${icon('edit')}Edit class</button>`}<button class="btn btn-primary" data-action="study-class" ${!cards.length?'disabled':''}>${icon('play')}Study class</button></div></div>
+  const offlineEntry=communityClass?state.publicCourses.find(entry=>entry.course.id===cls.id):null;
+  const offlineStatus=offlineEntry?.offlineCacheError?'Offline copy could not be saved. Check this device’s storage.':offlineEntry?.offlineCached?'Saved on this device for offline study.':offlineEntry?.offlineSavePending?'Saving this course for offline study…':'Public course · read-only';
+  return `<button class="back-link" data-action="library">${icon('back')}Back to my library</button><div class="class-header" style="${palette(cls.color)}"><div class="cover-icon">${icon(cls.icon)}</div><div><h1>${esc(cls.title)}</h1><p>${esc(cls.description||translateText('One card closer to knowing it by heart.',language()))}</p>${communityClass?`<span class="field-hint">${esc(offlineStatus)}</span>`:''}</div><div class="heading-actions">${communityClass?'':`<button class="btn btn-secondary" data-action="edit-class">${icon('edit')}Edit class</button>`}<button class="btn btn-primary" data-action="study-class" ${!cards.length?'disabled':''}>${icon('play')}Study class</button></div></div>
   <div class="section-heading"><h2>Your decks</h2><span class="section-count">${cls.decks.length}</span>${communityClass?'':`<div class="heading-actions push-right"><button class="btn btn-secondary btn-sm" data-action="import">${icon('upload')}Import cards</button><button class="btn btn-blue btn-sm" data-action="new-deck">${icon('plus')}Add a deck</button></div>`}</div>
   ${cls.decks.length?`<div class="deck-list">${cls.decks.map(deck=>`<div class="deck-row"><div class="deck-symbol">${icon('cards')}</div><div class="deck-info"><button class="deck-title" data-action="deck" data-id="${esc(deck.id)}">${esc(deck.title)}</button><p>${num(deck.cards.length)} cards <span aria-hidden="true">·</span> ${dueCount(deck.cards)} ready to study</p></div><div class="deck-mastery"><div class="mastery-line"><span>Mastery</span><strong>${getMastery(deck.cards)}%</strong></div><div class="mastery-track"><span style="width:${getMastery(deck.cards)}%"></span></div></div><button class="btn btn-secondary btn-sm" data-action="study-deck" data-id="${esc(deck.id)}" ${!deck.cards.length?'disabled':''}>${icon('play')}Study</button><button class="icon-btn" data-action="deck" data-id="${esc(deck.id)}" aria-label="Open ${esc(deck.title)}">${icon('chevron')}</button></div>`).join('')}</div>`:emptyHtml('A fresh start.','Create a deck to keep related flashcards together.',communityClass?'':'Add your first deck',communityClass?'':'new-deck')}
   ${cards.length?`<div class="study-note">${icon('target')}<div><strong>${getMastery(cards)}% mastered. A little further every day.</strong><p>${num(cards.length)} flashcards across ${cls.decks.length} decks, all in one place.</p></div></div>`:''}${footerHtml()}`;
