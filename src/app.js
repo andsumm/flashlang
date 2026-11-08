@@ -1,10 +1,11 @@
 import { icon } from './icons.js';
-import { exampleLibrary, emptyLibrary, newId, newCard, validateLibrary, normalizeClassIcon } from './data.js';
+import { exampleLibrary, emptyLibrary, newId, newCard, validateLibrary, normalizeClassIcon, normalizeSpeechLanguage, speechLanguages } from './data.js';
 import { parseImport, toCsv } from './importer.js';
 import { scheduleReview, selectStudyCards, resolveStudyScope, getMastery, dateKey } from './study.js';
 import { getStudyStats } from './stats.js';
 import { localize, translateText } from './i18n.js';
 import { createSoundFeedback } from './sounds.js';
+import { createSpeechController } from './speech.js';
 import { isCloudConfigured, getCloudClient, getAuthRedirectUrl, loadCloudLibrary, loadPublicCourses, saveCloudLibrary, syncPublicCourseProgress, importBrainscapePack } from './cloud.js';
 import { loadCachedPublicCourses, mergeCachedCourse, saveCachedPublicCourse } from './offline-courses.js';
 
@@ -18,6 +19,11 @@ const classIcon = cls => {
   const name=normalizeClassIcon(cls.icon,cls.title);
   if(name==='flags-en-it')return '<span class="language-flags" role="img" aria-label="English to Italian"><span class="language-flag-primary">🇮🇹</span><span class="language-flag-secondary">🇬🇧</span></span>';
   if(name==='flags-it-en')return '<span class="language-flags" role="img" aria-label="Italian to English"><span class="language-flag-primary">🇬🇧</span><span class="language-flag-secondary">🇮🇹</span></span>';
+  if(name.startsWith('emoji-pair:')){
+    const [first,second]=JSON.parse(name.slice(11));
+    return `<span class="class-emoji-pair" role="img" aria-label="Course icons"><span class="class-emoji-primary">${esc(first)}</span><span class="class-emoji-secondary">${esc(second)}</span></span>`;
+  }
+  if(name.startsWith('emoji:'))return `<span class="class-emoji" role="img" aria-label="Course icon">${esc(name.slice(6))}</span>`;
   return name==='flag-it'?'<span class="language-flag" aria-hidden="true">🇮🇹</span>':name==='flag-en'?'<span class="language-flag" aria-hidden="true">🇬🇧</span>':icon(name);
 };
 const storageKey = id => `recall.library.v1.${id || 'guest'}`;
@@ -33,6 +39,7 @@ let toastTimer, cloudTimer, syncChain=Promise.resolve(), syncGeneration=0, authG
 const courseWrites=new WeakMap(), courseSyncs=new WeakMap(), courseSyncTimers=new WeakMap();
 let storageWarningShown=false;
 const sounds = createSoundFeedback();
+const speech = createSpeechController(globalThis,{onError:()=>toast('Couldn’t play the answer audio. Try again.',true)});
 
 function soundButtonHtml() {
   return `<button type="button" class="icon-btn sound-toggle" data-action="toggle-sound" aria-label="Sound feedback" aria-pressed="${sounds.enabled}" title="${sounds.enabled?'Mute sounds':'Unmute sounds'}">${icon(sounds.enabled?'volume':'muted')}</button>`;
@@ -302,7 +309,8 @@ function libraryHtml() {
 }
 function classCardHtml(cls) {
   const cards=classCards(cls), mastery=getMastery(cards);
-  const languagePair=['flags-en-it','flags-it-en'].includes(normalizeClassIcon(cls.icon,cls.title));
+  const iconValue=normalizeClassIcon(cls.icon,cls.title);
+  const languagePair=['flags-en-it','flags-it-en'].includes(iconValue)||iconValue.startsWith('emoji-pair:');
   return `<article class="class-card" style="${palette(cls.color)}"><div class="class-cover"><div class="cover-grain"></div><div class="cover-icon${languagePair?' language-pair':''}">${classIcon(cls)}</div><div class="class-cover-copy"><h3 data-user-content="true">${esc(cls.title)}</h3><p data-user-content="true">${esc(cls.description||translateText('A new place for your next big idea.',language()))}</p></div></div><div class="class-card-body"><div class="class-card-meta"><span>${icon('book')}${cls.decks.length} ${cls.decks.length===1?'deck':'decks'}</span><span>${icon('cards')}${num(cards.length)} cards</span></div><div class="mastery-line"><span>Mastery</span><strong>${mastery}%</strong></div><div class="mastery-track"><span style="width:${mastery}%"></span></div><div class="class-card-footer"><span>${dueCount(cards)>0?`${num(dueCount(cards))} cards ready to study`:'Ready when you are'}</span>${icon('arrow')}</div></div><button class="class-card-link" data-action="class" data-id="${esc(cls.id)}" aria-label="Open ${esc(cls.title)}"></button></article>`;
 }
 function emptyHtml(title,description,label,action) {return `<div class="empty-state"><div class="empty-icon">${icon('cards')}</div><h3>${esc(title)}</h3><p>${esc(description)}</p>${label?`<button class="btn btn-primary" data-action="${action}">${icon('plus')}${esc(label)}</button>`:''}</div>`;}
@@ -361,12 +369,18 @@ function modalSuccess(message) {sounds.play('success');const node=$('#modal-succ
 function classModal(edit=false) {
   const cls=edit?currentClass():null;
   const classIconValue=normalizeClassIcon(cls?.icon,cls?.title);
+  const solutionLanguage=edit?normalizeSpeechLanguage(cls?.speechLanguage,classIconValue,cls?.title):'auto';
   const isFlagPair=classIconValue==='flags-en-it'||classIconValue==='flags-it-en';
-  const iconMode=isFlagPair?'pair':'single';
-  const largeFlag=classIconValue==='flags-en-it'||classIconValue==='flag-it'?'it':'en';
-  const smallFlag=largeFlag==='it'?'en':'it';
+  const isEmojiPair=classIconValue.startsWith('emoji-pair:');
+  const isPair=isFlagPair||isEmojiPair;
+  const iconMode=isPair?'pair':'single';
+  let emojiPair=['',''];
+  if(isEmojiPair)emojiPair=JSON.parse(classIconValue.slice(11));
+  else if(classIconValue==='flags-en-it')emojiPair=['🇮🇹','🇬🇧'];
+  else if(classIconValue==='flags-it-en')emojiPair=['🇬🇧','🇮🇹'];
+  const isCustomEmoji=classIconValue.startsWith('emoji:');
   const singleIcons=[['book','Book'],['globe','World'],['palette','Palette'],['bulb','Light bulb'],['leaf','Leaf'],['folder','Folder'],['flag-it','Italian flag'],['flag-en','English flag']];
-  showModal(edit?'A little fine-tuning.':'A new place to learn.',edit?'Make this class feel like yours.':'Group your decks around a subject, a goal, or a big idea.',`<form id="class-form" data-edit="${edit}"><div class="form-group"><label class="label" for="class-title">Class name</label><input class="input" id="class-title" name="title" placeholder="e.g. Italian essentials" value="${esc(cls?.title||'')}" maxlength="200" required></div><div class="form-group"><label class="label" for="class-description">A little description <span class="muted">(optional)</span></label><input class="input" id="class-description" name="description" placeholder="What are you curious about?" value="${esc(cls?.description||'')}" maxlength="1000"></div><fieldset class="form-group class-icon-picker"><legend class="label">Course icon</legend><div class="class-icon-modes"><label><input type="radio" name="icon-mode" value="single" ${iconMode==='single'?'checked':''}> One icon</label><label><input type="radio" name="icon-mode" value="pair" ${iconMode==='pair'?'checked':''}> Two flags</label></div><div class="class-icon-fields" id="single-icon-field" ${iconMode==='pair'?'hidden':''}><label class="label" for="single-icon">Icon</label><select class="input" id="single-icon" name="single-icon">${singleIcons.map(([value,label])=>`<option value="${value}" ${classIconValue===value?'selected':''}>${label}</option>`).join('')}</select></div><div class="class-icon-fields" id="pair-icon-fields" ${iconMode!=='pair'?'hidden':''}><label class="label" for="large-flag">Large flag <span class="muted">(language being learned)</span></label><select class="input" id="large-flag" name="large-flag"><option value="it" ${largeFlag==='it'?'selected':''}>Italian</option><option value="en" ${largeFlag==='en'?'selected':''}>English</option></select><label class="label" for="small-flag">Small flag <span class="muted">(prompt language)</span></label><select class="input" id="small-flag" name="small-flag"><option value="en" ${smallFlag==='en'?'selected':''}>English</option><option value="it" ${smallFlag==='it'?'selected':''}>Italian</option></select></div></fieldset><div class="form-group"><span class="label">Course visibility</span><label class="small muted" style="display:flex;align-items:center;gap:8px;line-height:1.7"><input id="class-visibility" type="checkbox" name="visibility" value="public" ${cls?.visibility==='public'?'checked':''} ${state.user?'':'disabled'}>Available to everyone</label><p class="field-hint" id="class-visibility-hint">${state.user?(cls?.visibility==='public'?'Anyone can view and study this course, even without an account.':'Private by default. Turn on availability to share this course.'):'Sign in to make a course available to everyone. Your classes stay private.'}</p></div><div class="form-group"><span class="label">Choose a color</span><input type="hidden" id="class-color" name="color" value="${cls?.color||'blue'}"><div class="color-options">${Object.entries(colors).map(([name,c])=>`<button type="button" class="color-option ${(cls?.color||'blue')===name?'selected':''}" data-action="choose-color" data-color="${name}" style="--accent:${c.accent}" aria-label="${name}" aria-pressed="${(cls?.color||'blue')===name}">${(cls?.color||'blue')===name?icon('check'):''}</button>`).join('')}</div></div><div id="modal-error" class="form-error" role="alert" hidden></div><div class="form-actions">${edit?'<button type="button" class="btn btn-danger btn-sm" data-action="delete-class">Delete class</button>':''}<button type="button" class="btn btn-quiet" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">${edit?'Save changes':'Create class'}${icon('arrow')}</button></div></form>`);
+  showModal(edit?'A little fine-tuning.':'A new place to learn.',edit?'Make this class feel like yours.':'Group your decks around a subject, a goal, or a big idea.',`<form id="class-form" data-edit="${edit}"><div class="form-group"><label class="label" for="class-title">Class name</label><input class="input" id="class-title" name="title" placeholder="e.g. Italian essentials" value="${esc(cls?.title||'')}" maxlength="200" required></div><div class="form-group"><label class="label" for="class-description">A little description <span class="muted">(optional)</span></label><input class="input" id="class-description" name="description" placeholder="What are you curious about?" value="${esc(cls?.description||'')}" maxlength="1000"></div><div class="form-group"><label class="label" for="class-speech-language">Solution language</label><select class="input" id="class-speech-language" name="speechLanguage"><option value="auto" ${solutionLanguage==='auto'?'selected':''}>Automatic (course name and icon)</option>${speechLanguages.map(([code,label])=>`<option value="${code}" ${solutionLanguage===code?'selected':''}>${label}</option>`).join('')}</select><p class="field-hint">Choose the language used when listening to answers.</p></div><fieldset class="form-group class-icon-picker"><legend class="label">Course icon</legend><div class="class-icon-modes"><label><input type="radio" name="icon-mode" value="single" ${iconMode==='single'?'checked':''}> One icon</label><label><input type="radio" name="icon-mode" value="pair" ${iconMode==='pair'?'checked':''}> Two icons</label></div><div class="class-icon-fields" id="single-icon-field" ${iconMode==='pair'?'hidden':''}><label class="label" for="single-icon">Icon</label><select class="input" id="single-icon" name="single-icon">${singleIcons.map(([value,label])=>`<option value="${value}" ${classIconValue===value?'selected':''}>${label}</option>`).join('')}<option value="custom-emoji" ${isCustomEmoji?'selected':''}>Custom emoji</option></select><div id="custom-single-icon-group" ${isCustomEmoji?'':'hidden'}><label class="label" for="custom-single-icon">Emoji</label><input class="input" id="custom-single-icon" name="custom-single-icon" maxlength="32" placeholder="e.g. 🧠" value="${isCustomEmoji?esc(classIconValue.slice(6)):''}"></div></div><div class="class-icon-fields" id="pair-icon-fields" ${iconMode!=='pair'?'hidden':''}><label class="label" for="first-icon">First icon</label><input class="input" id="first-icon" name="first-icon" maxlength="32" placeholder="e.g. 📚" value="${esc(emojiPair[0])}"><label class="label" for="second-icon">Second icon</label><input class="input" id="second-icon" name="second-icon" maxlength="32" placeholder="e.g. ✨" value="${esc(emojiPair[1])}"></div></fieldset><div class="form-group"><span class="label">Course visibility</span><label class="small muted" style="display:flex;align-items:center;gap:8px;line-height:1.7"><input id="class-visibility" type="checkbox" name="visibility" value="public" ${cls?.visibility==='public'?'checked':''} ${state.user?'':'disabled'}>Available to everyone</label><p class="field-hint" id="class-visibility-hint">${state.user?(cls?.visibility==='public'?'Anyone can view and study this course, even without an account.':'Private by default. Turn on availability to share this course.'):'Sign in to make a course available to everyone. Your classes stay private.'}</p></div><div class="form-group"><span class="label">Choose a color</span><input type="hidden" id="class-color" name="color" value="${cls?.color||'blue'}"><div class="color-options">${Object.entries(colors).map(([name,c])=>`<button type="button" class="color-option ${(cls?.color||'blue')===name?'selected':''}" data-color="${name}" style="--accent:${c.accent}" aria-label="${name}" aria-pressed="${(cls?.color||'blue')===name}">${(cls?.color||'blue')===name?icon('check'):''}</button>`).join('')}</div></div><div id="modal-error" class="form-error" role="alert" hidden></div><div class="form-actions">${edit?'<button type="button" class="btn btn-danger btn-sm" data-action="delete-class">Delete class</button>':''}<button type="button" class="btn btn-quiet" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">${edit?'Save changes':'Create class'}${icon('arrow')}</button></div></form>`);
 }
 function deckModal(edit=false) {
   if(!currentClass())return classModal();
@@ -538,7 +552,9 @@ function renderStudy() {
   if(!done&&!card){s.index++;return renderStudy();}
   const content=card?(s.revealed?card.answer:card.question):'';
   const answerHasNote=s.revealed&&/\n\s*\n/.test(content);
-  $('#app').innerHTML=`<div class="study-layout"><header class="study-topbar"><button class="back-link" data-action="exit-study" aria-label="Back to library">${icon('back')}<span>Back to library</span></button><div class="study-title"><strong>${esc(s.title)}</strong><span>${esc(s.subtitle)}</span></div><div class="study-header-actions"><span class="study-session-count">${s.ratings.length?'<b class="session-xp">+'+(s.ratings.length*10)+' XP</b>':''}${done?'Session complete':`${s.index+1} / ${s.items.length}`}</span>${soundButtonHtml()}</div></header><main id="main" class="session-main" tabindex="-1">${done?summaryHtml():`<div class="session-progress"><div class="mastery-track"><span style="width:${s.index/s.items.length*100}%;background:#79b0ce"></span></div><span>${Math.round(s.index/s.items.length*100)}%</span></div><article class="flashcard" aria-live="polite"><div class="flashcard-top"><span class="flashcard-side"><b>${s.revealed?'A':'Q'}</b>${s.revealed?'THE ANSWER':'A LITTLE CHALLENGE'}</span><button class="icon-btn ${card.starred?'starred':''}" data-action="star-study" aria-label="${card.starred?'Unstar this card':'Star this card'}" aria-pressed="${card.starred}">${icon('star')}</button></div>${s.revealed?`<div class="card-content ${content.length>180?'long-text':''} ${answerHasNote?'has-note':''}">${answerMarkup(content)}</div>`:`<button class="card-content flashcard-tap ${content.length>180?'long-text':''}" data-action="reveal" aria-label="${esc(content)}. Tap to reveal the answer.">${esc(content)}</button>`}${s.revealed?`<div class="answer-divider">${esc(card.question)}</div>`:''}<div class="flashcard-bottom"><span>${esc(s.items[s.index].deck.title)}</span><span>${card.reviewCount?'Seen '+card.reviewCount+' '+(card.reviewCount===1?'time':'times'):'A new little discovery'}</span></div></article><div class="study-controls">${s.revealed?`<p class="rating-question">How well did you know it?</p><div class="rating-buttons">${[1,2,3,4,5].map(r=>`<button class="rating-button" style="--rate:${rates[r]}" data-action="rate" data-rating="${r}" aria-label="${r}: ${rateLabels[r]}"><b>${r}</b><span>${rateLabels[r]}</span></button>`).join('')}</div><p class="keyboard-hint">Press <kbd>1</kbd>–<kbd>5</kbd> to rate your confidence</p>`:`<button class="btn btn-blue reveal-btn" data-action="reveal">Reveal answer ${icon('flip')}</button><p class="keyboard-hint">Press <kbd>Space</kbd> to reveal the answer</p>`}</div>`}</main><footer class="study-footer">${icon('leaf')}A little effort today. A little more knowledge tomorrow.<br>Your progress is saved as you go.</footer></div>`;
+  const cardMarkup=done?'':`<div class="session-progress"><div class="mastery-track"><span style="width:${s.index/s.items.length*100}%;background:#79b0ce"></span></div><span>${Math.round(s.index/s.items.length*100)}%</span></div><article class="flashcard" aria-live="polite"><div class="flashcard-top"><span class="flashcard-side"><b>${s.revealed?'A':'Q'}</b>${s.revealed?'THE ANSWER':'A LITTLE CHALLENGE'}</span><button class="icon-btn ${card.starred?'starred':''}" data-action="star-study" aria-label="${card.starred?'Unstar this card':'Star this card'}" aria-pressed="${card.starred}">${icon('star')}</button></div>${s.revealed?`<div class="card-content ${content.length>180?'long-text':''} ${answerHasNote?'has-note':''}">${answerMarkup(content)}</div>`:`<button class="card-content flashcard-tap ${content.length>180?'long-text':''}" data-action="reveal" aria-label="${esc(content)}. Tap to reveal the answer.">${esc(content)}</button>`}${s.revealed?`<div class="answer-divider">${esc(card.question)}</div>`:''}<div class="flashcard-bottom"><span>${esc(s.items[s.index].deck.title)}</span><span>${card.reviewCount?'Seen '+card.reviewCount+' '+(card.reviewCount===1?'time':'times'):'A new little discovery'}</span></div></article>`;
+  const controls=done?'':`<div class="study-controls">${s.revealed?`<button type="button" class="btn btn-secondary listen-answer-btn" data-action="listen-answer">${icon('volume')}Listen to answer</button><p class="rating-question">How well did you know it?</p><div class="rating-buttons">${[1,2,3,4,5].map(r=>`<button class="rating-button" style="--rate:${rates[r]}" data-action="rate" data-rating="${r}" aria-label="${r}: ${rateLabels[r]}"><b>${r}</b><span>${rateLabels[r]}</span></button>`).join('')}</div><p class="keyboard-hint">Press <kbd>1</kbd>–<kbd>5</kbd> to rate your confidence</p>`:`<button class="btn btn-blue reveal-btn" data-action="reveal">Reveal answer ${icon('flip')}</button><p class="keyboard-hint">Press <kbd>Space</kbd> to reveal the answer</p>`}</div>`;
+  $('#app').innerHTML=`<div class="study-layout"><header class="study-topbar"><button class="back-link" data-action="exit-study" aria-label="Back to library">${icon('back')}<span>Back to library</span></button><div class="study-title"><strong>${esc(s.title)}</strong><span>${esc(s.subtitle)}</span></div><div class="study-header-actions"><span class="study-session-count">${s.ratings.length?'<b class="session-xp">+'+(s.ratings.length*10)+' XP</b>':''}${done?'Session complete':`${s.index+1} / ${s.items.length}`}</span>${soundButtonHtml()}</div></header><main id="main" class="session-main" tabindex="-1">${done?summaryHtml():`${cardMarkup}${controls}`}</main><footer class="study-footer">${icon('leaf')}A little effort today. A little more knowledge tomorrow.<br>Your progress is saved as you go.</footer></div>`;
   localize($('#app'),language());
 }
 let studyTransition=false;
@@ -566,13 +582,22 @@ function revealAnswer() {
   sounds.play('reveal');
   return transitionStudy(()=>{state.study.revealed=true;renderStudy();},'reveal');
 }
+function listenToAnswer() {
+  const item=state.study?.items[state.study.index],card=studyCard();
+  if(!state.study?.revealed||!item||!card)return;
+  sounds.stop();
+  const speechLanguage=normalizeSpeechLanguage(item.cls.speechLanguage,normalizeClassIcon(item.cls.icon,item.cls.title),item.cls.title);
+  if(!speech.speak(card.answer,speechLanguage))toast('Spoken audio is not available in this browser.',true);
+}
 function rateAnswer(rating) {
   if(studyTransition||!state.study?.revealed||!Number.isInteger(rating)||rating<1||rating>5)return;
+  speech.stop();
   sounds.play('rate');
   return transitionStudy(()=>reviewCard(rating));
 }
 function reviewCard(rating) {
   const s=state.study;if(!s?.revealed||s.index>=s.items.length)return;
+  speech.stop();
   const {cls,deck}=s.items[s.index], card=studyCard(),now=new Date();
   const updated=scheduleReview(card,rating,now);deck.cards[deck.cards.findIndex(c=>c.id===card.id)]=updated;
   const seconds=Math.min(300,Math.max(1,Math.round((Date.now()-s.lastReviewAt)/1000)));s.seconds+=seconds;s.lastReviewAt=Date.now();
@@ -584,7 +609,7 @@ function summaryHtml() {
   const s=state.study,count=s.ratings.length,average=count?s.ratings.reduce((a,b)=>a+b,0)/count:0;
   return `<section class="session-summary"><div class="celebration" aria-hidden="true"><i style="--i:0"></i><i style="--i:1"></i><i style="--i:2"></i><i style="--i:3"></i><i style="--i:4"></i><i style="--i:5"></i><i style="--i:6"></i><i style="--i:7"></i><i style="--i:8"></i><i style="--i:9"></i><i style="--i:10"></i><i style="--i:11"></i></div><div class="summary-icon">${icon('check')}</div><div class="eyebrow">A LITTLE WISER THAN BEFORE</div><h1>That’s progress. Yours.</h1><div class="earned-xp">${icon('spark')} +${count*10} XP earned</div><p>A few minutes well spent.<br>The tricky cards will be here when you’re ready to meet them again.</p><div class="summary-stats"><div><strong>${count}</strong><span>Cards studied</span></div><div><strong>${Math.max(1,Math.round(s.seconds/60))} min</strong><span>Time invested</span></div><div><strong>${average.toFixed(1)} / 5</strong><span>Avg. confidence</span></div></div><div class="summary-actions"><button class="btn btn-secondary" data-action="exit-study">Back to my library</button><button class="btn btn-primary" data-action="study-again">Keep learning ${icon('arrow')}</button></div></section>`;
 }
-function exitStudy() {state.study=null;render();window.scrollTo({top:0,behavior:'instant'});if(navigator.onLine){if(state.user)loadPublicCoursesOfflineFirst(state.user.id);else initCloud();}}
+function exitStudy() {speech.stop();state.study=null;render();window.scrollTo({top:0,behavior:'instant'});if(navigator.onLine){if(state.user)loadPublicCoursesOfflineFirst(state.user.id);else initCloud();}}
 function resumeLastStudy() {
   const {scope,scopeId}=resolveStudyScope(state.library,readLastStudy());
   startStudy(scope,scopeId);
@@ -714,8 +739,8 @@ const actions = {
   'settings-from-modal':()=>{closeModal();navigate('settings');},'close-modal':closeModal,help:helpModal,
   'study-all':resumeLastStudy,'study-class':()=>startStudy('class',state.classId),'study-deck':el=>startStudy('deck',el.dataset.id||state.deckId),
   'retry-course-sync':()=>{const entry=state.publicCourses.find(item=>item.course.id===state.classId);if(entry)return runCourseProgressSync(entry);},
-  reveal:revealAnswer,rate:el=>rateAnswer(Number(el.dataset.rating)),'exit-study':exitStudy,
-  'study-again':()=>{const s=state.study;state.study=null;startStudy(s.scope,s.scopeId);},
+  reveal:revealAnswer,'listen-answer':listenToAnswer,rate:el=>rateAnswer(Number(el.dataset.rating)),'exit-study':exitStudy,
+  'study-again':()=>{const s=state.study;speech.stop();state.study=null;startStudy(s.scope,s.scopeId);},
   'save-goal':()=>{const value=Number($('#daily-goal').value);if(!Number.isInteger(value)||value<5||value>500)return toast('Choose a daily goal between 5 and 500 cards.',true);state.library.settings.dailyGoal=value;persist();render();toast('A little goal, made for you.');},
   backup:()=>{download(`recall-backup-${dateKey()}.json`,JSON.stringify(state.library,null,2),'application/json');toast('Your backup is ready. Keep it somewhere safe.');},
   'export-deck':()=>{const deck=currentDeck();download(`${deck.title.replace(/[^a-z0-9_-]/gi,'-')}.csv`,toCsv(deck.cards),'text/csv;charset=utf-8');toast('Your deck is ready to take with you.');},
@@ -734,12 +759,24 @@ document.addEventListener('submit',event=>{
   try{
     if(form.id==='class-form'){
       const values=new FormData(form),title=values.get('title').trim();if(!title)return modalError('Give your class a name.');
-      if(values.get('icon-mode')==='pair'&&values.get('large-flag')===values.get('small-flag'))return modalError('Choose two different flags.');
-      const selectedIcon=values.get('icon-mode')==='pair'?`flags-${values.get('small-flag')}-${values.get('large-flag')}`:values.get('single-icon');
+      const iconMode=values.get('icon-mode');
+      const singleIcon=values.get('single-icon');
+      let selectedIcon;
+      if(iconMode==='pair'){
+        const first=values.get('first-icon').trim(),second=values.get('second-icon').trim();
+        if(!first||!second)return modalError('Choose two icons.');
+        selectedIcon=`emoji-pair:${JSON.stringify([first,second])}`;
+      }else if(singleIcon==='custom-emoji'){
+        const emoji=values.get('custom-single-icon').trim();
+        if(!emoji)return modalError('Choose an emoji.');
+        selectedIcon=`emoji:${emoji}`;
+      }else selectedIcon=singleIcon;
       const classIcon=normalizeClassIcon(selectedIcon);
+      if(classIcon==='book'&&selectedIcon!=='book')return modalError('Use an icon or emoji up to 32 characters long.');
       const visibility=state.user&&values.get('visibility')==='public'?'public':'private';
-      if(form.dataset.edit==='true'){Object.assign(currentClass(),{title,description:values.get('description').trim(),color:values.get('color'),icon:classIcon,visibility});persist();closeModal();render();toast('A little update, saved.');}
-      else{const cls={id:newId(),title,description:values.get('description').trim(),color:values.get('color'),icon:classIcon,visibility,createdAt:new Date().toISOString(),decks:[]};state.library.classes.unshift(cls);persist();closeModal();navigate('class',cls.id);toast('A new class. A new possibility.');}
+      const speechLanguage=normalizeSpeechLanguage(values.get('speechLanguage'),classIcon,title);
+      if(form.dataset.edit==='true'){Object.assign(currentClass(),{title,description:values.get('description').trim(),color:values.get('color'),icon:classIcon,speechLanguage,visibility});persist();closeModal();render();toast('A little update, saved.');}
+      else{const cls={id:newId(),title,description:values.get('description').trim(),color:values.get('color'),icon:classIcon,speechLanguage,visibility,createdAt:new Date().toISOString(),decks:[]};state.library.classes.unshift(cls);persist();closeModal();navigate('class',cls.id);toast('A new class. A new possibility.');}
     }
     if(form.id==='deck-form'){
       const title=new FormData(form).get('title').trim();if(!title)return modalError('Give your deck a name.');
@@ -767,6 +804,7 @@ document.addEventListener('change',event=>{
     $('#pair-icon-fields').hidden=!pair;
     return;
   }
+  if(el.id==='single-icon'){$('#custom-single-icon-group').hidden=el.value!=='custom-emoji';return;}
   if(el.id==='class-visibility'){const hint=$('#class-visibility-hint');if(hint)hint.textContent=el.checked?'Anyone can view and study this course, even without an account.':'Private by default. Turn on availability to share this course.';return;}
   if(el.id==='theme-select'){setTheme(el.value);return;}
   if(el.id==='language-select'){state.library.settings.language=el.value==='it'?'it':'en';persist();render();return;}
@@ -789,7 +827,7 @@ document.addEventListener('keydown',event=>{
   else if(event.key==='/'&&!event.metaKey&&!event.ctrlKey){event.preventDefault();$('#global-search')?.focus();}
   else if(event.key==='Escape'&&state.mobile)setMobileMenu(false);
 });
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){sounds.stop();if(state.user&&state.sync==='saving')queueCloudSave();}});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){sounds.stop();speech.stop();if(state.user&&state.sync==='saving')queueCloudSave();}});
 window.addEventListener('online',()=>{
   if(state.study){
     if(state.user){

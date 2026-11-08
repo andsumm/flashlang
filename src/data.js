@@ -2,10 +2,52 @@ import { englishVerbDecks } from './english-course.js';
 
 export const newId = () => crypto.randomUUID();
 export const newCard = (question, answer) => ({id:newId(), question, answer, confidence:0, dueAt:null, reviewedAt:null, reviewCount:0, starred:false});
+export const speechLanguages = [
+  ['en-US','English'],['it-IT','Italiano'],['fr-FR','Français'],['es-ES','Español'],
+  ['de-DE','Deutsch'],['pt-PT','Português'],['nl-NL','Nederlands'],['ja-JP','日本語'],
+  ['zh-CN','中文'],['ko-KR','한국어'],['ru-RU','Русский'],['ar-SA','العربية'],
+  ['hi-IN','हिन्दी'],['pl-PL','Polski'],['sv-SE','Svenska'],['tr-TR','Türkçe'],
+];
+export function normalizeSpeechLanguage(language, icon, title) {
+  if (speechLanguages.some(([code]) => code === language)) return language;
+  if (icon === 'flags-en-it') return 'it-IT';
+  if (icon === 'flags-it-en') return 'en-US';
+  if (icon === 'flag-it') return 'it-IT';
+  if (icon === 'flag-en') return 'en-US';
+  const name = String(title || '').toLocaleLowerCase();
+  const matches = [
+    ['it-IT', /\b(italian|italiano|italiana|italien)\b/],
+    ['fr-FR', /\b(french|français|francais|française|francese)\b/],
+    ['es-ES', /\b(spanish|español|espanol|spagnolo|castellano)\b/],
+    ['de-DE', /\b(german|deutsch|tedesco)\b/],
+    ['pt-PT', /\b(portuguese|português|portugues|portoghese)\b/],
+    ['nl-NL', /\b(dutch|nederlands|olandese)\b/],
+    ['ja-JP', /\b(japanese|giapponese)\b|日本語/],
+    ['zh-CN', /\b(chinese|cinese)\b|中文/],
+    ['ko-KR', /\b(korean|coreano)\b|한국어/],
+    ['ru-RU', /\b(russian|russo)\b|русский/],
+    ['ar-SA', /\b(arabic|arabo)\b|العربية/],
+    ['hi-IN', /\b(hindi)\b|हिन्दी/],
+    ['pl-PL', /\b(polish|polski|polacco)\b/],
+    ['sv-SE', /\b(swedish|svenska|svedese)\b/],
+    ['tr-TR', /\b(turkish|türkçe|turco)\b/],
+    ['en-US', /\b(english|inglés|inglese|anglais|englisch)\b/],
+  ];
+  return matches.find(([, pattern]) => pattern.test(name))?.[0] || 'en-US';
+}
 export const normalizeClassIcon = (icon,title) => {
   if (!icon&&title==='Italian essentials') return 'flags-en-it';
   if (!icon&&title==='Inglese') return 'flags-it-en';
-  return ['globe','palette','book','bulb','leaf','folder','flag-it','flag-en','flags-en-it','flags-it-en'].includes(icon)?icon:'book';
+  if (['globe','palette','book','bulb','leaf','folder','flag-it','flag-en','flags-en-it','flags-it-en'].includes(icon)) return icon;
+  const validEmoji = value => typeof value==='string'&&value.length>0&&value.length<=32&&!/[\u0000-\u001f\u007f]/.test(value)&&/\p{Emoji}/u.test(value);
+  if (typeof icon==='string'&&icon.startsWith('emoji:')&&validEmoji(icon.slice(6))) return icon;
+  if (typeof icon==='string'&&icon.startsWith('emoji-pair:')) {
+    try {
+      const pair=JSON.parse(icon.slice(11));
+      if (Array.isArray(pair)&&pair.length===2&&pair.every(validEmoji)) return icon;
+    } catch {}
+  }
+  return 'book';
 };
 const makeDeck = (title, pairs) => ({id:newId(),title:title.replace(/^([A-C][12] — )\d+ /,'$1'),createdAt:new Date().toISOString(),cards:pairs.map(([q,a])=>newCard(q,a))});
 const makeVerbDeck = ({title,verbs}) => makeDeck(title,verbs.flatMap(([italian,base,past,participle,ing,thirdPerson])=>[
@@ -85,6 +127,20 @@ export function exampleLibrary() {
           ['Ho avuto una giornata pienissima.','I’ve had a really busy day.'],
           ['Mi ha fatto piacere parlare con te.','It was nice talking with you.']
         ]),
+        makeDeck('A1 — Practical phrases', [
+          ['Può aiutarmi, per favore?','Could you help me, please? (formal)'],
+          ['Sto cercando una farmacia.','I’m looking for a pharmacy.'],
+          ['È aperto oggi?','Is it open today?'],
+          ['A che ora chiude?','What time does it close?'],
+          ['Vorrei pagare con la carta.','I’d like to pay by card.'],
+          ['Posso avere una ricevuta?','Can I have a receipt?'],
+          ['C’è un tavolo libero?','Is there a table available?'],
+          ['Senza ghiaccio, per favore.','Without ice, please.'],
+          ['Mi può indicare la strada?','Could you show me the way? (formal)'],
+          ['Quanto tempo ci vuole?','How long does it take?'],
+          ['Ho una prenotazione a nome mio.','I have a reservation under my name.'],
+          ['Potrebbe parlare più lentamente?','Could you speak more slowly? (formal)']
+        ]),
         ...englishVerbDecks.map(makeVerbDeck)
       ]
     },
@@ -98,8 +154,7 @@ export function exampleLibrary() {
     {
       title:'Design fundamentals',description:'Build an eye for the things that work.',color:'purple',icon:'palette',
       decks:[
-        makeDeck('Principles of design', [['What is visual hierarchy?','The arrangement of elements to guide attention in order of importance.'],['What is white space?','The empty space between and around elements in a composition.'],['What does contrast help establish?','Visual interest, readability, and emphasis.'],['What is the purpose of alignment?','To create order and visual relationships between elements.'],['What is proximity in design?','Placing related elements close together so they are perceived as a group.'],['What is repetition used for?','Creating consistency and strengthening a visual identity.']]),
-        makeDeck('Color & typography', [['What are complementary colors?','Colors opposite one another on the color wheel.'],['What is kerning?','Adjusting the space between individual pairs of letters.'],['What is leading?','The vertical space between lines of text.'],['What is a serif?','A small stroke attached to the end of a larger stroke in a letter.'],['What does a color’s saturation describe?','The intensity or purity of the color.'],['What is a typeface’s x-height?','The height of lowercase letters, measured using the lowercase x.']])
+        makeDeck('Principles of design', [['What is visual hierarchy?','The arrangement of elements to guide attention in order of importance.'],['What is white space?','The empty space between and around elements in a composition.'],['What does contrast help establish?','Visual interest, readability, and emphasis.'],['What is the purpose of alignment?','To create order and visual relationships between elements.'],['What is proximity in design?','Placing related elements close together so they are perceived as a group.'],['What is repetition used for?','Creating consistency and strengthening a visual identity.']])
       ]
     }
   ];
@@ -138,7 +193,8 @@ export function validateLibrary(value) {
   };
   const classes = value.classes.map(cls=>{
     if (!Array.isArray(cls.decks) || cls.decks.length>1000) throw new Error('Invalid decks in backup.');
-    return { id:uniqueId(cls.id),title:text(normalizeCourseTitle(cls.title),200),description:typeof cls.description==='string'?cls.description.slice(0,1000):'',color:['blue','green','purple','orange','pink'].includes(cls.color)?cls.color:'blue',icon:normalizeClassIcon(cls.icon,cls.title),visibility:cls.visibility==='public'?'public':'private',createdAt:time(cls.createdAt)||new Date().toISOString(),decks:cls.decks.map(deck=>{
+    const icon=normalizeClassIcon(cls.icon,cls.title);
+    return { id:uniqueId(cls.id),title:text(normalizeCourseTitle(cls.title),200),description:typeof cls.description==='string'?cls.description.slice(0,1000):'',color:['blue','green','purple','orange','pink'].includes(cls.color)?cls.color:'blue',icon,speechLanguage:normalizeSpeechLanguage(cls.speechLanguage,icon,cls.title),visibility:cls.visibility==='public'?'public':'private',createdAt:time(cls.createdAt)||new Date().toISOString(),decks:cls.decks.map(deck=>{
       if (!Array.isArray(deck.cards) || (cardCount+=deck.cards.length)>100000) throw new Error('This backup has too many cards (maximum 100,000).');
       return {id:uniqueId(deck.id),title:text(normalizeDeckTitle(deck.title),200),createdAt:time(deck.createdAt)||new Date().toISOString(),cards:deck.cards.map(card=>({id:uniqueId(card.id),question:text(card.question,20000),answer:text(card.answer,20000),confidence:Math.max(0,Math.min(5,Math.floor(Number(card.confidence)||0))),reviewCount:Math.max(0,Math.min(1000000,Math.floor(Number(card.reviewCount)||0))),dueAt:time(card.dueAt),reviewedAt:time(card.reviewedAt),starred:Boolean(card.starred)}))};
     })};

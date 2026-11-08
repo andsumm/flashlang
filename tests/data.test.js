@@ -1,20 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateLibrary, emptyLibrary, exampleLibrary, newCard, normalizeClassIcon } from '../src/data.js';
+import { validateLibrary, emptyLibrary, exampleLibrary, newCard, normalizeClassIcon, normalizeSpeechLanguage } from '../src/data.js';
 
 function backup() {
   return {
     version: 1,
     classes: [
       {
-        id: 'class-one', title: 'Italian', description: 'Useful expressions', color: 'green', icon: 'globe', visibility: 'private', createdAt: '2026-11-01T10:00:00.000Z',
+        id: 'class-one', title: 'Italian', description: 'Useful expressions', color: 'green', icon: 'globe', speechLanguage: 'it-IT', visibility: 'private', createdAt: '2026-11-01T10:00:00.000Z',
         decks: [{
           id: 'deck-one', title: 'Greetings', createdAt: '2026-11-01T11:00:00.000Z',
           cards: [{ id: 'card-one', question: 'Buongiorno?', answer: 'Good morning', confidence: 4, reviewCount: 8, dueAt: '2026-11-10T10:00:00.000Z', reviewedAt: '2026-11-07T10:00:00.000Z', starred: true }],
         }],
       },
       {
-        id: 'class-two', title: 'Science', description: '', color: 'purple', icon: 'bulb', visibility: 'private', createdAt: '2026-11-02T10:00:00.000Z',
+        id: 'class-two', title: 'Science', description: '', color: 'purple', icon: 'bulb', speechLanguage: 'en-US', visibility: 'private', createdAt: '2026-11-02T10:00:00.000Z',
         decks: [{
           id: 'deck-two', title: 'Biology', createdAt: '2026-11-02T11:00:00.000Z',
           cards: [{ id: 'card-two', question: 'What stores genetic information?', answer: 'DNA', confidence: 0, reviewCount: 0, dueAt: null, reviewedAt: null, starred: false }],
@@ -151,14 +151,52 @@ test('language courses without a saved icon migrate to source-to-target flag pai
   assert.deepEqual(validateLibrary(library).classes.map(cls => cls.icon), ['flags-en-it', 'flags-it-en']);
 });
 
+test('spoken answer language is validated and inferred from course direction or name', () => {
+  const examples = exampleLibrary();
+  assert.equal(normalizeSpeechLanguage(examples.classes[0].speechLanguage, examples.classes[0].icon, examples.classes[0].title), 'it-IT');
+  assert.equal(normalizeSpeechLanguage(examples.classes[1].speechLanguage, examples.classes[1].icon, examples.classes[1].title), 'en-US');
+  const library = backup();
+  library.classes[0].speechLanguage = 'not-a-language';
+  library.classes[0].title = 'Français débutant';
+  library.classes[1].speechLanguage = 'it-IT';
+  const restored = validateLibrary(library);
+  assert.equal(restored.classes[0].speechLanguage, 'fr-FR');
+  assert.equal(restored.classes[1].speechLanguage, 'it-IT');
+  assert.equal(normalizeSpeechLanguage('auto', 'flags-en-it', 'French'), 'it-IT');
+  assert.equal(normalizeSpeechLanguage('auto', 'flag-it', 'French'), 'it-IT');
+  assert.equal(normalizeSpeechLanguage('auto', 'flag-en', 'Italian'), 'en-US');
+  assert.equal(normalizeSpeechLanguage(null, 'book', 'Curso de español'), 'es-ES');
+  assert.equal(normalizeSpeechLanguage(null, 'book', 'Japanese basics'), 'ja-JP');
+  assert.equal(normalizeSpeechLanguage(null, 'book', '中文'), 'zh-CN');
+  assert.equal(normalizeSpeechLanguage(null, 'book', 'General knowledge'), 'en-US');
+  const legacy = backup();
+  delete legacy.classes[0].speechLanguage;
+  legacy.classes[0].title = 'Italian basics';
+  delete legacy.classes[1].speechLanguage;
+  legacy.classes[1].title = 'French A1';
+  assert.deepEqual(validateLibrary(legacy).classes.map(cls => cls.speechLanguage), ['it-IT', 'fr-FR']);
+});
+
 test('custom course icons are preserved even when course names match the examples', () => {
   assert.equal(normalizeClassIcon('globe', 'Italian essentials'), 'globe');
   assert.equal(normalizeClassIcon('book', 'Inglese'), 'book');
   assert.equal(normalizeClassIcon('flag-it', 'Italian essentials'), 'flag-it');
   assert.equal(normalizeClassIcon('flag-en', 'Inglese'), 'flag-en');
+  assert.equal(normalizeClassIcon('emoji:🧠', 'Italian essentials'), 'emoji:🧠');
+  assert.equal(normalizeClassIcon('emoji:1️⃣'), 'emoji:1️⃣');
+  assert.equal(normalizeClassIcon('emoji-pair:["📚","✨"]'), 'emoji-pair:["📚","✨"]');
   assert.equal(normalizeClassIcon('flags-en-it'), 'flags-en-it');
   assert.equal(normalizeClassIcon('flags-it-en'), 'flags-it-en');
   assert.equal(normalizeClassIcon('unknown'), 'book');
+});
+
+test('emoji course icons survive backup validation and invalid custom values fall back safely', () => {
+  const library=backup();
+  library.classes[0].icon='emoji:🧠';
+  library.classes[1].icon='emoji-pair:["📚","✨"]';
+  assert.deepEqual(validateLibrary(library).classes.map(cls=>cls.icon),['emoji:🧠','emoji-pair:["📚","✨"]']);
+  assert.equal(normalizeClassIcon('emoji:<script>alert(1)</script>'), 'book');
+  assert.equal(normalizeClassIcon('emoji-pair:["📚"]'), 'book');
 });
 
 test('course visibility is limited to public or private and defaults to private', () => {
@@ -222,7 +260,7 @@ test('default examples include one expanded Inglese course with unique-prompt le
   const course = library.classes.find(item => item.title === 'Inglese');
   assert.ok(course);
   assert.equal(course.icon, 'flags-it-en');
-  assert.equal(course.decks.length, 30);
+  assert.equal(course.decks.length, 31);
   assert.deepEqual(course.decks.slice(0, 13).map(deck => deck.title), [
     'A1 — Greetings', 'A1 — Nouns and articles', 'A1 — Adjectives',
     'A2 — Basic conversation', 'A2 — Pronouns and origins', 'A2 — Possession',
@@ -233,13 +271,16 @@ test('default examples include one expanded Inglese course with unique-prompt le
   const legacyLibrary = backup();
   legacyLibrary.classes[0].decks[0].title = 'A1 — 01 Greetings';
   assert.equal(validateLibrary(legacyLibrary).classes[0].decks[0].title, 'A1 — Greetings');
-  assert.deepEqual(course.decks.slice(13, 16).map(deck => [deck.title, deck.cards.length]), [
+  assert.deepEqual(course.decks.slice(13, 17).map(deck => [deck.title, deck.cards.length]), [
     ['A1 — Everyday conversation', 12],
     ['A2 — Making plans and chatting', 12],
     ['B1 — Keeping a conversation going', 12],
+    ['A1 — Practical phrases', 12],
   ]);
-  assert.ok(course.decks.slice(16).every(deck => deck.cards.length === 80));
+  assert.ok(course.decks.slice(17).every(deck => deck.cards.length === 80));
   const prompts = course.decks.flatMap(deck => deck.cards.map(card => card.question.toLocaleLowerCase('it')));
-  assert.equal(prompts.length, 1270);
+  assert.equal(prompts.length, 1282);
   assert.equal(new Set(prompts).size, prompts.length);
+  assert.ok(!course.decks.flatMap(deck => deck.cards).some(card => /vertical|serif|kerning|x-height/i.test(`${card.question} ${card.answer}`)));
+  assert.ok(!library.classes.find(item => item.title === 'Design fundamentals').decks.some(deck => deck.title === 'Color & typography'));
 });

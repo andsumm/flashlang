@@ -9,7 +9,7 @@ The app is a progressive web app (PWA): use it in a browser or install it on a p
 ## ✨ What you can do
 
 - **Organize a study library** into classes, decks, and question-and-answer cards.
-- **Study at your own pace.** Rate each answer from 1 to 5; confident cards get longer review intervals, while tricky cards return sooner. Smart sessions prioritize due and unseen cards, and the play button remembers your last class or deck.
+- **Study at your own pace.** Listen to revealed answers in each course’s solution language; Flashlang prefers a natural or enhanced installed voice when available. Choose the language in the class settings, or let Flashlang infer it from the course name and icon. Rate each answer from 1 to 5; confident cards get longer review intervals, while tricky cards return sooner. Smart sessions prioritize due and unseen cards, and the play button remembers your last class or deck.
 - **See your progress** with review and study-time totals, mastery, streaks, daily goals, and activity charts.
 - **Bring your own cards.** Import CSV, TSV, text, or JSON files, paste spreadsheet rows or `Q:` / `A:` blocks, or import from a public card pack. Export decks as CSV or back up and restore your full library as JSON.
 - **Make it yours** with a theme that follows your device’s light or dark setting (or a manual override), English and Italian interface text, and optional locally generated sound cues.
@@ -19,13 +19,13 @@ The app is a progressive web app (PWA): use it in a browser or install it on a p
 
 Flashlang is a static frontend built with browser-native HTML, CSS, and JavaScript modules. It has no bundler or package-install step. The app can run as a guest without a backend; Supabase is an optional service for account authentication, private cloud libraries, public courses, and public pack importing.
 
-The main data model is a **library → classes → decks → cards** hierarchy. Each card stores its question, answer, confidence, review schedule, and optional starred state. Study activity and preferences live with the library.
+The main data model is a **library → classes → decks → cards** hierarchy. Each class stores its spoken-answer language; cards store their question, answer, confidence, review schedule, and optional starred state. Study activity and preferences live with the library.
 
 | Area | Files | Responsibility |
 | --- | --- | --- |
 | App and interface | `index.html`, `src/app.js`, `src/icons.js` | Page entry point, app state, navigation, library and study views, and interactions |
 | Library and study logic | `src/data.js`, `src/study.js`, `src/stats.js` | Example data, validation, review scheduling, card selection, and progress calculations |
-| Import, language, and sound | `src/importer.js`, `src/i18n.js`, `src/sounds.js` | Card file parsing and export, public pack URL validation, English/Italian interface copy, and sound feedback |
+| Import, language, and sound | `src/importer.js`, `src/i18n.js`, `src/sounds.js`, `src/speech.js` | Card file parsing and export, public pack URL validation, interface translations, sound feedback, and spoken answers |
 | Cloud and offline support | `src/cloud.js`, `config.js`, `sw.js`, `manifest.webmanifest` | Optional Supabase access, public app-shell caching, and install metadata |
 | Presentation | `styles.css`, `design.css`, `themes.css` | Layout, visual design, and theme styles |
 | Backend and publishing | `supabase/`, `scripts/build.py`, `.github/workflows/` | Database schema and import function, packaging, and deployment |

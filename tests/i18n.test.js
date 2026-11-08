@@ -5,6 +5,8 @@ import { translateText } from '../src/i18n.js';
 test('Italian translations cover navigation, study controls, and grouped counts', () => {
   assert.equal(translateText('My library', 'it'), 'La mia libreria');
   assert.equal(translateText('Reveal answer', 'it'), 'Rivela la risposta');
+  assert.equal(translateText('Listen to answer', 'it'), 'Ascolta la risposta');
+  assert.equal(translateText('Solution language', 'it'), 'Lingua della risposta');
   assert.equal(translateText('2,784 cards', 'it'), '2,784 schede');
   assert.equal(translateText('1 review due', 'it'), '1 ripasso in scadenza');
   assert.equal(translateText('2 reviews due', 'it'), '2 ripassi in scadenza');

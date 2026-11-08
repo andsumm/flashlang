@@ -30,6 +30,14 @@ function normalizeCourseProgress(progress) {
   };
 }
 
+function isOptionalTableMissingError(error) {
+  if (!error || typeof error.message !== 'string') return false;
+  const message = error.message.toLowerCase();
+  return (message.includes('could not find the table') && (message.includes('public_courses') || message.includes('course_progress'))) ||
+    (message.includes('relation') && message.includes('does not exist') && (message.includes('public_courses') || message.includes('course_progress'))) ||
+    message.includes('schema cache');
+}
+
 export function isCloudConfigured() {
   const { url, key } = cloudConfig();
   if (!url || !key) return false;
@@ -131,7 +139,10 @@ export async function loadPublicCourses() {
     .from('public_courses')
     .select('owner_id,course_id,data')
     .order('updated_at', { ascending: false });
-  if (error) throw new Error(`Could not load public courses: ${error.message}`);
+  if (error) {
+    if (isOptionalTableMissingError(error)) return [];
+    throw new Error(`Could not load public courses: ${error.message}`);
+  }
   return (data || []).map(row => {
     const library = validateLibrary({
       version: 1,
@@ -156,7 +167,10 @@ export async function syncPublicCourseProgress(userId, courseId, localProgress) 
     .select('card_id,progress,updated_at')
     .eq('user_id', userId)
     .eq('course_id', courseId);
-  if (error) throw new Error(`Could not load your course progress: ${error.message}`);
+  if (error) {
+    if (isOptionalTableMissingError(error)) return localProgress;
+    throw new Error(`Could not load your course progress: ${error.message}`);
+  }
   const merged = new Map();
   for (const row of data || []) {
     const progress = normalizeCourseProgress(row.progress);
