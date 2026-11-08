@@ -193,10 +193,24 @@ test('default examples include one expanded Inglese course with unique-prompt le
   const library = exampleLibrary();
   const course = library.classes.find(item => item.title === 'Inglese');
   assert.ok(course);
-  assert.equal(course.decks.length, 27);
+  assert.equal(course.decks.length, 30);
+  assert.deepEqual(course.decks.slice(0, 13).map(deck => deck.title), [
+    'A1 — Greetings', 'A1 — Nouns and articles', 'A1 — Adjectives',
+    'A2 — Basic conversation', 'A2 — Pronouns and origins', 'A2 — Possession',
+    'A2 — Family and friends', 'B1 — Numbers and money', 'B1 — Days',
+    'B1 — Time', 'B2 — Food and drink', 'B2 — Getting around', 'C1 — Pronunciation tips',
+  ]);
   assert.deepEqual(course.decks.map(deck => deck.title.slice(0, 2)), ['A1', 'A1', 'A1', 'A2', 'A2', 'A2', 'A2', 'B1', 'B1', 'B1', 'B2', 'B2', 'C1']);
-  assert.ok(course.decks.slice(13).every(deck => deck.cards.length === 80));
+  const legacyLibrary = backup();
+  legacyLibrary.classes[0].decks[0].title = 'A1 — 01 Greetings';
+  assert.equal(validateLibrary(legacyLibrary).classes[0].decks[0].title, 'A1 — Greetings');
+  assert.deepEqual(course.decks.slice(13, 16).map(deck => [deck.title, deck.cards.length]), [
+    ['A1 — Everyday conversation', 12],
+    ['A2 — Making plans and chatting', 12],
+    ['B1 — Keeping a conversation going', 12],
+  ]);
+  assert.ok(course.decks.slice(16).every(deck => deck.cards.length === 80));
   const prompts = course.decks.flatMap(deck => deck.cards.map(card => card.question.toLocaleLowerCase('it')));
-  assert.equal(prompts.length, 1234);
+  assert.equal(prompts.length, 1270);
   assert.equal(new Set(prompts).size, prompts.length);
 });

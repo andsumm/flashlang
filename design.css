@@ -168,6 +168,16 @@ h2{font-size:21px;letter-spacing:-.6px}h3{font-size:16px;letter-spacing:-.3px}
 .brainscape-import-row{display:flex;gap:8px;align-items:stretch}
 .brainscape-import-row .input{flex:1;min-width:0}
 .brainscape-import-row .btn{flex-shrink:0}
+@media(max-width:760px){
+  .mobile-nav{inset:auto 16px calc(12px + env(safe-area-inset-bottom));max-width:620px;margin-inline:auto;padding:6px 7px;gap:4px;background:#f9f8faed;border-color:#fff;border-radius:24px;box-shadow:0 9px 28px #30203918,0 1px 3px #3020390b}
+  .mobile-nav>button{min-height:50px;gap:4px;border:1px solid transparent;border-radius:16px;color:#706677;font-size:9px;font-weight:500}
+  .mobile-nav>button .icon{width:19px;height:19px;stroke-width:1.75}
+  .mobile-nav>button:hover:not(.selected):not(.mobile-study){background:#f0edf3;color:#4e4656}
+  .mobile-nav>button.selected{background:#eee8f3;border-color:#fff;color:#6c547a;box-shadow:inset 0 1px 2px #fff,0 2px 6px #4c38570d}
+  .mobile-nav>button:active{background:#e8dbee;transform:scale(.97)}
+  .mobile-nav>button.mobile-study{color:#706677}
+  .mobile-study i{width:38px;height:38px;margin-top:-16px;border:3px solid #f9f8fa;background:#29272e;color:#fff;box-shadow:0 4px 12px #29222f24}
+}
 @media(max-width:600px){
   .brainscape-import-row{flex-wrap:wrap}
   .brainscape-import-row .input{flex-basis:100%}

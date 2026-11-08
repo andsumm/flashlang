@@ -161,3 +161,45 @@
   [data-theme="dark"] .mobile-nav>button:active{background:#4f385e}
   [data-theme="dark"] .mobile-study i{background:#d2bce8;color:#34233e;box-shadow:0 4px 14px #0003}
 }
+
+html{-webkit-text-size-adjust:auto;text-size-adjust:auto}
+button{-webkit-appearance:none;appearance:none}
+/* Keep row backgrounds inside rounded surfaces, especially with high-contrast borders. */
+:is(.class-card,.deck-list,.card-list){overflow:hidden}
+:is(.class-card,.deck-list,.card-list):focus-within{outline:2px solid currentColor;outline-offset:2px}
+
+@media(prefers-contrast:more){
+  :is(.class-card,.deck-list,.card-list,.card-result,.panel,.modal,.flashcard,.class-header,.daily-quest,.stat,.input,.btn-secondary,.rating-button){border-color:currentColor}
+}
+
+@media(max-width:760px) and (prefers-contrast:more){
+  :is(.eyebrow,.class-card-meta,.class-card-footer,.mastery-line,.page-footer,.quest-copy p,.rating-button span,.study-footer,.card-number,.calendar-key){font-size:max(12px,1em)}
+  .class-card-meta{flex-wrap:wrap}
+  .btn,.icon-btn,.back-link,.text-link,.topbar-account{min-height:44px}
+}
+
+@media(max-width:760px){
+  .mobile-nav{
+    max-width:560px;
+    padding:4px 6px;
+    gap:3px;
+    border-radius:20px;
+    animation:mobileNavEnter .35s var(--ease) both;
+  }
+  .mobile-nav>button{
+    min-height:43px;
+    gap:3px;
+    border-radius:14px;
+    font-size:9px;
+    transition:background-color .2s,color .2s,transform .2s var(--ease),box-shadow .2s;
+  }
+  .mobile-nav>button .icon{width:17px;height:17px;transition:transform .2s var(--ease)}
+  .mobile-nav>button.selected .icon{transform:translateY(-1px)}
+  .mobile-nav>button:active{transform:scale(.96)}
+  .mobile-study i{width:34px;height:34px;margin-top:-13px}
+}
+
+@keyframes mobileNavEnter{
+  from{opacity:0;transform:translateY(12px)}
+  to{opacity:1;transform:translateY(0)}
+}

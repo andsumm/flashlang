@@ -2,7 +2,7 @@ import { englishVerbDecks } from './english-course.js';
 
 export const newId = () => crypto.randomUUID();
 export const newCard = (question, answer) => ({id:newId(), question, answer, confidence:0, dueAt:null, reviewedAt:null, reviewCount:0, starred:false});
-const makeDeck = (title, pairs) => ({id:newId(),title,createdAt:new Date().toISOString(),cards:pairs.map(([q,a])=>newCard(q,a))});
+const makeDeck = (title, pairs) => ({id:newId(),title:title.replace(/^([A-C][12] — )\d+ /,'$1'),createdAt:new Date().toISOString(),cards:pairs.map(([q,a])=>newCard(q,a))});
 const makeVerbDeck = ({title,verbs}) => makeDeck(title,verbs.flatMap(([italian,base,past,participle,ing,thirdPerson])=>[
   [`Come si dice “${italian}” in inglese?`,`to ${base}`],
   [`Qual è il past simple di “${base}”?`,past],
@@ -38,6 +38,48 @@ export function exampleLibrary() {
         makeDeck('B2 — 11 Food and drink', [['Vorrei un tavolo per due.','I would like a table for two.'],['il menù del giorno','the menu of the day'],["un'acqua frizzante",'a sparkling water'],['senza formaggio','without cheese'],['Sono vegetariano / vegetariana.','I am vegetarian. (masculine / feminine)'],['un piatto di pasta','a plate of pasta'],['È molto piccante?','Is it very spicy?'],['Posso assaggiare?','May I try a taste?'],['un gelato alla fragola','a strawberry ice cream'],['Buon appetito!','Enjoy your meal!']]),
         makeDeck('B2 — 12 Getting around', [["Dov'è la fermata dell'autobus?",'Where is the bus stop?'],['un biglietto di sola andata','a one-way ticket'],['Il treno parte alle nove.','The train leaves at nine.'],['Scenda alla prossima fermata.','Get off at the next stop. (formal command)'],['a nord della piazza','north of the square'],['Continui fino al ponte.','Continue as far as the bridge. (formal command)'],['È lontano da qui?','Is it far from here?'],['Ho perso la strada.',"I've lost my way."],["l'ingresso principale",'the main entrance'],['un taxi libero','an available taxi']]),
         makeDeck('C1 — 13 Pronunciation tips', [['che / chi','The letters ch sound like k before e or i, as in che and chi.'],['ce / ci','The letter c sounds like English "ch" before e or i, as in cena and cinema.'],['ge / gi','The letter g sounds like English "j" before e or i, as in gelato and giro.'],['ghe / ghi','The h keeps g hard before e or i, as in spaghetti and laghi.'],['gli','In many words (for example famiglia), gli is a palatal sound with no exact English equivalent.'],['gn','In words such as gnocchi, gn sounds roughly like "ny" in canyon.'],['sci / sce','The letters sc sound like English "sh" before i or e, as in sciare and scena.'],['h in ho / hai','The h is silent; ho and hai sound like o and ai.'],['double consonants','Hold a double consonant slightly longer than a single one; it can distinguish word meanings.']]),
+        makeDeck('A1 — Everyday conversation', [
+          ['Ciao, come va?','Hi, how are you? (informal)'],
+          ['Come ti chiami?','What is your name? (informal)'],
+          ['Mi chiamo Luca.','My name is Luca.'],
+          ['Piacere di conoscerti.','Nice to meet you. (informal)'],
+          ['Che cosa fai?','What do you do?'],
+          ['Abito vicino al centro.','I live near the city center.'],
+          ['Studio inglese la sera.','I study English in the evening.'],
+          ['A che ora comincia?','What time does it start?'],
+          ['Possiamo sederci qui?','Can we sit here?'],
+          ['Scusa, dov’è il bagno?','Excuse me, where is the bathroom? (informal)'],
+          ['Puoi parlare più lentamente?','Can you speak more slowly? (informal)'],
+          ['Ci vediamo dopo.','See you later.']
+        ]),
+        makeDeck('A2 — Making plans and chatting', [
+          ['Ti va di prendere un caffè?','Would you like to get a coffee? (informal)'],
+          ['Che ne dici di sabato?','How about Saturday?'],
+          ['A che ora ci vediamo?','What time shall we meet?'],
+          ['Facciamo alle sette.','Let’s make it seven.'],
+          ['Ci vediamo davanti al cinema.','I’ll meet you in front of the cinema.'],
+          ['Mi dispiace, sono in ritardo.','Sorry, I’m running late.'],
+          ['Ti mando un messaggio quando arrivo.','I’ll text you when I arrive.'],
+          ['Puoi tenermi un posto?','Can you save me a seat?'],
+          ['Non ho ancora deciso.','I haven’t decided yet.'],
+          ['Preferisco qualcosa di tranquillo.','I’d prefer something quiet.'],
+          ['Devo andare, ci sentiamo domani.','I have to go; I’ll talk to you tomorrow.'],
+          ['È stato bello rivederti.','It was nice to see you again.']
+        ]),
+        makeDeck('B1 — Keeping a conversation going', [
+          ['Da quanto tempo vivi qui?','How long have you lived here?'],
+          ['Non ci avevo pensato.','I hadn’t thought of that.'],
+          ['Capisco cosa intendi, però…','I see what you mean, but…'],
+          ['In realtà, la vedo diversamente.','Actually, I see it differently.'],
+          ['Potresti spiegarmi cosa intendi?','Could you explain what you mean?'],
+          ['Mi sono perso l’ultima parte.','I missed the last part.'],
+          ['Per quanto ne so…','As far as I know…'],
+          ['Non è proprio quello che intendevo.','That’s not quite what I meant.'],
+          ['Fammi sapere come va.','Let me know how it goes.'],
+          ['Non vedo l’ora di vederti.','I’m looking forward to seeing you.'],
+          ['Ho avuto una giornata pienissima.','I’ve had a really busy day.'],
+          ['Mi ha fatto piacere parlare con te.','It was nice talking with you.']
+        ]),
         ...englishVerbDecks.map(makeVerbDeck)
       ]
     },
@@ -87,7 +129,7 @@ export function validateLibrary(value) {
       '12 Getting around': 'B2 — 12 Getting around',
       '13 Pronunciation tips': 'C1 — 13 Pronunciation tips',
     };
-    return map[value] || value;
+    return (map[value] || value).replace(/^([A-C][12] — )\d+ /,'$1');
   };
   const classes = value.classes.map(cls=>{
     if (!Array.isArray(cls.decks) || cls.decks.length>1000) throw new Error('Invalid decks in backup.');
