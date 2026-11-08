@@ -1,7 +1,7 @@
 const MAX_CARDS = 10_000;
 const MAX_FIELD_LENGTH = 20_000;
-const QUESTION_HEADERS = new Set(['question', 'front', 'term', 'prompt']);
-const ANSWER_HEADERS = new Set(['answer', 'back', 'definition', 'response']);
+const QUESTION_HEADERS = new Set(['question', 'front', 'term', 'prompt', 'domanda']);
+const ANSWER_HEADERS = new Set(['answer', 'back', 'definition', 'response', 'risposta']);
 const DELIMITERS = { csv: ',', tsv: '\t', semicolon: ';', pipe: '|' };
 
 /** Parse delimited text without losing quoted commas, newlines, or escaped quotes. */

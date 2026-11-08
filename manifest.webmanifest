@@ -2,13 +2,13 @@
   "id": "./",
   "name": "Flashlang",
   "short_name": "Flashlang",
-  "description": "A dark, mobile-first flashcard study game. Build a daily streak, earn XP, and make knowledge stick.",
+  "description": "A calm, beautifully focused flashcard study space. Build a daily streak, earn XP, and make knowledge stick.",
   "lang": "en",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#151d2b",
-  "theme_color": "#172131",
+  "background_color": "#eeedf0",
+  "theme_color": "#eeedf0",
   "categories": [
     "education",
     "games"

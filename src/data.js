@@ -1,7 +1,7 @@
 export const newId = () => crypto.randomUUID();
 export const newCard = (question, answer) => ({id:newId(), question, answer, confidence:0, dueAt:null, reviewedAt:null, reviewCount:0, starred:false});
 const makeDeck = (title, pairs) => ({id:newId(),title,createdAt:new Date().toISOString(),cards:pairs.map(([q,a])=>newCard(q,a))});
-export const emptyLibrary = () => ({version:1,classes:[],activity:[],settings:{dailyGoal:20}});
+export const emptyLibrary = () => ({version:1,classes:[],activity:[],settings:{dailyGoal:20,language:'en'}});
 export function exampleLibrary() {
   const library = emptyLibrary();
   const classes = [
@@ -47,5 +47,5 @@ export function validateLibrary(value) {
     })};
   });
   const activity=Array.isArray(value.activity)?value.activity.filter(a=>a&&typeof a.date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(a.date)&&Number.isFinite(Date.parse(a.date))&&new Date(a.date).toISOString().slice(0,10)===a.date).slice(-5000).map(a=>({id:typeof a.id==='string'?a.id:newId(),date:a.date,cards:Math.max(0,Math.min(1000000,Math.floor(Number(a.cards)||0))),seconds:Math.max(0,Math.min(86400,Math.floor(Number(a.seconds)||0)))})):[];
-  return {version:1,classes,activity,settings:{dailyGoal:Math.max(5,Math.min(500,Math.floor(Number(value.settings?.dailyGoal)||20)))}};
+  return {version:1,classes,activity,settings:{dailyGoal:Math.max(5,Math.min(500,Math.floor(Number(value.settings?.dailyGoal)||20))),language:value.settings?.language==='it'?'it':'en'}};
 }

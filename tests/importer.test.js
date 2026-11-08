@@ -29,6 +29,11 @@ test('header matching is exact and supports metadata columns', () => {
   assert.equal(result.warnings.length, 1);
 });
 
+test('Italian CSV example treats Domanda and Risposta as headers', () => {
+  assert.deepEqual(parseImport('Domanda,Risposta\nQuanto fa 2+2?,4').cards,
+    [{ question: 'Quanto fa 2+2?', answer: '4' }]);
+});
+
 test('JSON accepts supported field names and wrappers', () => {
   assert.deepEqual(parseImport('{"cards":[{"front":"Hello","back":"Ciao"},{"term":"Bye","definition":"Arrivederci"}]}').cards,
     [{ question: 'Hello', answer: 'Ciao' }, { question: 'Bye', answer: 'Arrivederci' }]);

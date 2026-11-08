@@ -22,7 +22,7 @@ function backup() {
       },
     ],
     activity: [{ id: 'activity-one', date: '2026-11-07', cards: 12, seconds: 73 }],
-    settings: { dailyGoal: 30 },
+    settings: { dailyGoal: 30, language: 'en' },
   };
 }
 
@@ -157,8 +157,18 @@ test('activity history is bounded and daily goal has sensible defaults and bound
   assert.equal(validateLibrary(library).settings.dailyGoal, 20);
 });
 
+test('language setting accepts Italian and safely defaults old or invalid backups to English', () => {
+  const library = backup();
+  library.settings.language = 'it';
+  assert.equal(validateLibrary(library).settings.language, 'it');
+  delete library.settings.language;
+  assert.equal(validateLibrary(library).settings.language, 'en');
+  library.settings.language = '<script>';
+  assert.equal(validateLibrary(library).settings.language, 'en');
+});
+
 test('empty libraries and newly created cards contain clean defaults', () => {
-  assert.deepEqual(validateLibrary(emptyLibrary()), { version: 1, classes: [], activity: [], settings: { dailyGoal: 20 } });
+  assert.deepEqual(validateLibrary(emptyLibrary()), { version: 1, classes: [], activity: [], settings: { dailyGoal: 20, language: 'en' } });
   const card = newCard('Question', 'Answer');
   assert.match(card.id, /^[0-9a-f-]{36}$/i);
   assert.equal(card.confidence, 0);
