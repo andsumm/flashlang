@@ -2,6 +2,11 @@ import { englishVerbDecks } from './english-course.js';
 
 export const newId = () => crypto.randomUUID();
 export const newCard = (question, answer) => ({id:newId(), question, answer, confidence:0, dueAt:null, reviewedAt:null, reviewCount:0, starred:false});
+export const normalizeClassIcon = (icon,title) => {
+  if (title==='Italian essentials') return 'flags-en-it';
+  if (title==='Inglese') return 'flags-it-en';
+  return ['globe','palette','book','bulb','leaf','folder','flag-it','flag-en','flags-en-it','flags-it-en'].includes(icon)?icon:'book';
+};
 const makeDeck = (title, pairs) => ({id:newId(),title:title.replace(/^([A-C][12] — )\d+ /,'$1'),createdAt:new Date().toISOString(),cards:pairs.map(([q,a])=>newCard(q,a))});
 const makeVerbDeck = ({title,verbs}) => makeDeck(title,verbs.flatMap(([italian,base,past,participle,ing,thirdPerson])=>[
   [`Come si dice “${italian}” in inglese?`,`to ${base}`],
@@ -15,7 +20,7 @@ export function exampleLibrary() {
   const library = emptyLibrary();
   const classes = [
     {
-      title:'Italian essentials', description:'A little Italian. A whole new world.', color:'blue', icon:'globe',
+      title:'Italian essentials', description:'A little Italian. A whole new world.', color:'blue', icon:'flags-en-it',
       decks:[
         makeDeck('Everyday expressions', [['How do you say “good morning” in Italian?','Buongiorno'],['How do you say “thank you”?','Grazie'],['What does “per favore” mean?','Please'],['How do you say “see you soon”?','A presto'],['What does “come stai?” mean?','How are you?'],['How do you say “you’re welcome”?','Prego'],['What does “mi chiamo” mean?','My name is'],['How do you say “nice to meet you”?','Piacere']]),
         makeDeck('At the café', [['How do you order a coffee politely?','Un caffè, per favore.'],['What does “il conto, per favore” mean?','The bill, please.'],['How do you say “a glass of water”?','Un bicchiere d’acqua'],['What is a “cornetto”?','An Italian pastry, similar to a croissant.'],['How do you ask “how much is it?”','Quanto costa?'],['What does “da portare via” mean?','To take away']]),
@@ -23,7 +28,7 @@ export function exampleLibrary() {
       ]
     },
     {
-      title:'Inglese', description:'A progressive English course from A1 through C1 with clear CEFR checkpoints.', color:'blue', icon:'globe',
+      title:'Inglese', description:'A progressive English course from A1 through C1 with clear CEFR checkpoints.', color:'blue', icon:'flags-it-en',
       decks:[
         makeDeck('A1 — 01 Greetings', [['Salve!','Hello! (polite or neutral greeting)'],['Buona serata!','Have a good evening!'],['A domani.','See you tomorrow.'],['Come si chiama?','What is your name? (formal)'],['Sono canadese.','I am Canadian.'],['Di dove sei?','Where are you from? (informal)'],['Non capisco.',"I don't understand."],['Può ripetere?','Could you repeat that? (formal)']]),
         makeDeck('A1 — 02 Nouns and articles', [['il tavolo','the table'],['la finestra','the window'],["un amico / un'amica",'a male friend / a female friend'],['lo studente','the male student'],['gli studenti','the students (masculine or mixed group)'],['le chiavi','the keys'],["dell'acqua",'some water; of the water'],["un'arancia",'an orange']]),
@@ -133,7 +138,7 @@ export function validateLibrary(value) {
   };
   const classes = value.classes.map(cls=>{
     if (!Array.isArray(cls.decks) || cls.decks.length>1000) throw new Error('Invalid decks in backup.');
-    return { id:uniqueId(cls.id),title:text(normalizeCourseTitle(cls.title),200),description:typeof cls.description==='string'?cls.description.slice(0,1000):'',color:['blue','green','purple','orange','pink'].includes(cls.color)?cls.color:'blue',icon:['globe','palette','book','bulb','leaf','folder'].includes(cls.icon)?cls.icon:'book',visibility:cls.visibility==='public'?'public':'private',createdAt:time(cls.createdAt)||new Date().toISOString(),decks:cls.decks.map(deck=>{
+    return { id:uniqueId(cls.id),title:text(normalizeCourseTitle(cls.title),200),description:typeof cls.description==='string'?cls.description.slice(0,1000):'',color:['blue','green','purple','orange','pink'].includes(cls.color)?cls.color:'blue',icon:normalizeClassIcon(cls.icon,cls.title),visibility:cls.visibility==='public'?'public':'private',createdAt:time(cls.createdAt)||new Date().toISOString(),decks:cls.decks.map(deck=>{
       if (!Array.isArray(deck.cards) || (cardCount+=deck.cards.length)>100000) throw new Error('This backup has too many cards (maximum 100,000).');
       return {id:uniqueId(deck.id),title:text(normalizeDeckTitle(deck.title),200),createdAt:time(deck.createdAt)||new Date().toISOString(),cards:deck.cards.map(card=>({id:uniqueId(card.id),question:text(card.question,20000),answer:text(card.answer,20000),confidence:Math.max(0,Math.min(5,Math.floor(Number(card.confidence)||0))),reviewCount:Math.max(0,Math.min(1000000,Math.floor(Number(card.reviewCount)||0))),dueAt:time(card.dueAt),reviewedAt:time(card.reviewedAt),starred:Boolean(card.starred)}))};
     })};

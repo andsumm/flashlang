@@ -134,6 +134,23 @@ test('display preferences are restricted and unknown metadata is discarded', () 
   assert.equal('password' in restored, false);
 });
 
+test('language course emoji icons are accepted in backups', () => {
+  const library = backup();
+  library.classes[0].icon = 'flags-en-it';
+  library.classes[1].icon = 'flags-it-en';
+  const restored = validateLibrary(library);
+  assert.deepEqual(restored.classes.map(cls => cls.icon), ['flags-en-it', 'flags-it-en']);
+});
+
+test('existing language courses migrate to source-to-target flag pairs', () => {
+  const library = backup();
+  library.classes[0].title = 'Italian essentials';
+  library.classes[1].title = 'Inglese';
+  library.classes[0].icon = 'flag-it';
+  library.classes[1].icon = 'flag-en';
+  assert.deepEqual(validateLibrary(library).classes.map(cls => cls.icon), ['flags-en-it', 'flags-it-en']);
+});
+
 test('course visibility is limited to public or private and defaults to private', () => {
   const library = backup();
   library.classes[0].visibility = 'public';
@@ -191,8 +208,10 @@ test('empty libraries and newly created cards contain clean defaults', () => {
 
 test('default examples include one expanded Inglese course with unique-prompt lectures across A1–C1', () => {
   const library = exampleLibrary();
+  assert.equal(library.classes.find(item => item.title === 'Italian essentials').icon, 'flags-en-it');
   const course = library.classes.find(item => item.title === 'Inglese');
   assert.ok(course);
+  assert.equal(course.icon, 'flags-it-en');
   assert.equal(course.decks.length, 30);
   assert.deepEqual(course.decks.slice(0, 13).map(deck => deck.title), [
     'A1 — Greetings', 'A1 — Nouns and articles', 'A1 — Adjectives',

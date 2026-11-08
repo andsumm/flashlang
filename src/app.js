@@ -1,11 +1,11 @@
 import { icon } from './icons.js';
-import { exampleLibrary, emptyLibrary, newId, newCard, validateLibrary } from './data.js';
+import { exampleLibrary, emptyLibrary, newId, newCard, validateLibrary, normalizeClassIcon } from './data.js';
 import { parseImport, toCsv } from './importer.js';
 import { scheduleReview, selectStudyCards, resolveStudyScope, getMastery, dateKey } from './study.js';
 import { getStudyStats } from './stats.js';
 import { localize, translateText } from './i18n.js';
 import { createSoundFeedback } from './sounds.js';
-import { isCloudConfigured, getCloudClient, getAuthRedirectUrl, loadCloudLibrary, loadPublicCourses, saveCloudLibrary, importBrainscapePack } from './cloud.js';
+import { isCloudConfigured, getCloudClient, getAuthRedirectUrl, loadCloudLibrary, loadPublicCourses, saveCloudLibrary, syncPublicCourseProgress, importBrainscapePack } from './cloud.js';
 import { loadCachedPublicCourses, mergeCachedCourse, saveCachedPublicCourse } from './offline-courses.js';
 
 const $ = selector => document.querySelector(selector);
@@ -14,6 +14,12 @@ const colors = {blue:{accent:'#88bedf',tint:'#23394e'},green:{accent:'#a0c49f',t
 const rates = ['#d8e0e8','#d77f89','#e69c60','#d2bd67','#8fb58a','#65a6c7'];
 const rateLabels = ['Not studied','Not yet','A little','Getting there','Almost there','Got it'];
 const palette = color => {const c=colors[color]||colors.blue;return `--accent:${c.accent};--tint:${c.tint}`;};
+const classIcon = cls => {
+  const name=normalizeClassIcon(cls.icon,cls.title);
+  if(name==='flags-en-it')return '<span class="language-flags" role="img" aria-label="English to Italian"><span class="language-flag-primary">🇮🇹</span><span class="language-flag-secondary">🇬🇧</span></span>';
+  if(name==='flags-it-en')return '<span class="language-flags" role="img" aria-label="Italian to English"><span class="language-flag-primary">🇬🇧</span><span class="language-flag-secondary">🇮🇹</span></span>';
+  return name==='flag-it'?'<span class="language-flag" aria-hidden="true">🇮🇹</span>':name==='flag-en'?'<span class="language-flag" aria-hidden="true">🇬🇧</span>':icon(name);
+};
 const storageKey = id => `recall.library.v1.${id || 'guest'}`;
 function readLocal(id) {
   try {const value=localStorage.getItem(storageKey(id));return value?validateLibrary(JSON.parse(value)):null;} catch {return null;}
@@ -23,7 +29,8 @@ function readLocalSync(id) {
 }
 let initialLibrary=readLocal();
 const state = {library:initialLibrary||exampleLibrary(),publicCourses:[],publicCoursesError:'',view:'library',classId:null,deckId:null,user:null,query:'',sort:'recent',filter:'all',mobile:false,cloudReady:false,cloudLoading:false,cloudError:'',sync:'local',dirty:false,revision:0,study:null,visibleCards:100,authMode:'login',importDraft:null};
-let toastTimer, cloudTimer, syncChain=Promise.resolve(), syncGeneration=0, authGeneration=0, lastFocus, boundUserId;
+let toastTimer, cloudTimer, syncChain=Promise.resolve(), syncGeneration=0, authGeneration=0, publicCoursesLoadGeneration=0, lastFocus, boundUserId, authListenerBound=false;
+const courseWrites=new WeakMap(), courseSyncs=new WeakMap(), courseSyncTimers=new WeakMap();
 let storageWarningShown=false;
 const sounds = createSoundFeedback();
 
@@ -43,7 +50,7 @@ function toggleSound() {
 const logo = `<svg class="brand-logo" viewBox="0 0 36 36" fill="none" aria-hidden="true"><path d="M18 3c5.5 0 7.2 6.1 7.2 7.8 1.7 0 7.8 1.7 7.8 7.2s-6.1 7.2-7.8 7.2c0 1.7-1.7 7.8-7.2 7.8s-7.2-6.1-7.2-7.8C9.1 25.2 3 23.5 3 18s6.1-7.2 7.8-7.2C10.8 9.1 12.5 3 18 3Z" stroke="#98cce8" stroke-width="1.7"/><path d="M18 11v14m-7-7h14" stroke="#98cce8" stroke-width="1.7"/><circle cx="27.5" cy="8.5" r="3.2" fill="#ee9568"/></svg>`;
 const allCards = () => state.library.classes.flatMap(c=>c.decks.flatMap(d=>d.cards));
 const classCards = cls => cls.decks.flatMap(d=>d.cards);
-const publicClasses = () => state.publicCourses.filter(entry=>entry.ownerId!==state.user?.id).map(entry=>entry.course);
+const publicClasses = () => state.publicCourses.filter(entry=>state.cloudError||entry.ownerId!==state.user?.id).map(entry=>entry.course);
 const isCommunityClass = cls => Boolean(cls && !state.library.classes.some(item=>item.id===cls.id) && publicClasses().some(item=>item.id===cls.id));
 const currentClass = () => state.library.classes.find(c=>c.id===state.classId)||publicClasses().find(c=>c.id===state.classId);
 const currentDeck = () => currentClass()?.decks.find(d=>d.id===state.deckId);
@@ -121,9 +128,87 @@ function toast(message, error=false) {
   toastTimer=setTimeout(()=>$('#toast-root').replaceChildren(),error?6500:3500);
 }
 function navigate(view='library', classId=null, deckId=null) {
-  state.view=view;state.classId=classId;state.deckId=deckId;state.mobile=false;state.query='';state.visibleCards=100;
-  render();window.scrollTo({top:0,behavior:'instant'});
-  if(view==='class')cachePublicCourse(currentClass());
+  const update=()=>{
+    state.view=view;state.classId=classId;state.deckId=deckId;state.mobile=false;state.query='';state.visibleCards=100;
+    render();window.scrollTo({top:0,behavior:'instant'});
+    if(view==='class')cachePublicCourse(currentClass());
+  };
+  if(state.mobile){closeMobileMenu(update);return;}
+  update();
+}
+function cachePublicCourse(cls, touchedCardId=null) {
+  if(!isCommunityClass(cls))return;
+  const entry=state.publicCourses.find(item=>item.course.id===cls.id);
+  if(!entry)return;
+  const progressOwner=state.user?.id||'guest';
+  if(touchedCardId){
+    const card=cls.decks.flatMap(deck=>deck.cards).find(item=>item.id===touchedCardId);
+    if(card)entry.progress={...entry.progress,[touchedCardId]:{confidence:card.confidence,dueAt:card.dueAt,reviewedAt:card.reviewedAt,reviewCount:card.reviewCount,starred:card.starred,updatedAt:new Date().toISOString()}};
+  }
+  entry.offlineSavePending=true;entry.offlineCacheError=false;
+  if(state.view==='class'&&state.classId===cls.id)renderContent();
+  const previous=courseWrites.get(entry)||Promise.resolve();
+  const write=previous.catch(()=>{}).then(()=>saveCachedPublicCourse(entry,{userId:progressOwner,touchedCardId}));
+  courseWrites.set(entry,write);
+  write.then(saved=>{
+    entry.progress=saved.progress;
+    entry.offlineCached=true;entry.offlineSavePending=false;
+    if(state.user?.id===progressOwner&&navigator.onLine)syncCourseProgress(entry);
+    if(state.view==='class'&&state.classId===cls.id)renderContent();
+  }).catch(error=>{
+    entry.offlineSavePending=false;entry.offlineCacheError=true;
+    console.warn('Public course could not be saved for offline study:',error.message);
+    if(state.user?.id===progressOwner&&navigator.onLine)syncCourseProgress(entry);
+    if(state.view==='class'&&state.classId===cls.id)renderContent();
+  });
+}
+function syncCourseProgress(entry) {
+  if(!state.user||!navigator.onLine||!entry?.progress)return;
+  const userId=state.user.id,generation=authGeneration;
+  clearTimeout(courseSyncTimers.get(entry));
+  courseSyncTimers.set(entry,setTimeout(()=>{
+    if(state.user?.id===userId&&generation===authGeneration)runCourseProgressSync(entry);
+  },800));
+}
+function runCourseProgressSync(entry) {
+  clearTimeout(courseSyncTimers.get(entry));courseSyncTimers.delete(entry);
+  if(!state.user||!navigator.onLine||!entry?.progress)return Promise.resolve();
+  const userId=state.user.id,generation=authGeneration;
+  const previous=courseSyncs.get(entry)||Promise.resolve();
+  const sync=previous.catch(()=>{}).then(async()=>{
+    if(!state.user||state.user.id!==userId||generation!==authGeneration||!navigator.onLine)return;
+    await (courseWrites.get(entry)||Promise.resolve()).catch(()=>{});
+    if(!state.user||state.user.id!==userId||generation!==authGeneration||!navigator.onLine)return;
+    entry.progressSync='syncing';
+    const requestedCourse=structuredClone(entry.course);
+    const localProgress=Object.entries(entry.progress).map(([cardId,progress])=>({cardId,progress,updatedAt:progress.updatedAt}));
+    try {
+      const cloudProgress=await syncPublicCourseProgress(userId,entry.course.id,localProgress);
+      if(!state.user||state.user.id!==userId||generation!==authGeneration)return;
+      const requestedCards=new Map(requestedCourse.decks.flatMap(deck=>deck.cards.map(card=>[card.id,card])));
+      if(entry.course.decks.some(deck=>deck.cards.some(card=>{
+        const requested=requestedCards.get(card.id);
+        return requested&&['confidence','dueAt','reviewedAt','reviewCount','starred'].some(field=>card[field]!==requested[field]);
+      }))) {entry.progressSync='pending';return;}
+      const merged=mergeCachedCourse(entry,entry,cloudProgress);
+      const mergedCards=new Map(merged.course.decks.flatMap(deck=>deck.cards.map(card=>[card.id,card])));
+      for(const deck of entry.course.decks)for(const card of deck.cards){
+        const updated=mergedCards.get(card.id);
+        if(updated)for(const field of ['confidence','dueAt','reviewedAt','reviewCount','starred'])card[field]=updated[field];
+      }
+      entry.progress=merged.progress;entry.progressSync='synced';entry.progressSyncError='';
+      if(entry.offlineCached)await saveCachedPublicCourse(entry,{preserveProgress:true});
+    }catch(error){
+      entry.progressSync='error';entry.progressSyncError=error.message||'Could not sync course progress.';
+      console.error('Public course progress could not sync:',error.message);
+    }
+    if(state.view==='class'&&state.classId===entry.course.id)renderContent();
+  });
+  courseSyncs.set(entry,sync);
+  return sync;
+}
+function syncAllPublicCourseProgress() {
+  return Promise.all(state.publicCourses.filter(entry=>entry.offlineCached).map(entry=>runCourseProgressSync(entry)));
 }
 function render() {
   if(state.study){renderStudy();return;}
@@ -139,7 +224,7 @@ function questHtml() {
 }
 function sidebarHtml() {
   const classes=state.library.classes, studied=todayActivity(), goal=state.library.settings.dailyGoal;
-  return `${state.mobile?'<div class="sidebar-backdrop" data-action="toggle-menu"></div>':''}<aside class="sidebar ${state.mobile?'open':''}" aria-label="Main navigation">
+  return `<div class="sidebar-backdrop ${state.mobile?'visible':''}" data-action="toggle-menu"></div><aside class="sidebar ${state.mobile?'open':''}" aria-label="Main navigation">
     <button class="brand" data-action="library" aria-label="Flashlang home">${logo}<span class="brand-word">flashlang<span class="brand-dot">.</span></span></button>
     <nav aria-label="Your workspace"><div class="nav-label workspace-label">WORKSPACE</div>
       <button class="nav-item ${state.view==='library'?'active':''}" data-action="library">${icon('grid')}<span>My library</span><span class="nav-badge">${classes.length}</span></button>
@@ -155,19 +240,46 @@ function sidebarHtml() {
     <div class="sidebar-footer"><div class="avatar">${state.user?esc(state.user.email.slice(0,2).toUpperCase()):icon('user')}</div><div class="sidebar-user"><strong>${state.user?esc(state.user.email.split('@')[0]):translateText('Your study space',language())}</strong><span>${state.user?'Personal account':'Make yourself at home'}</span></div><button data-action="${state.user?'account':'login'}" aria-label="${state.user?'Account settings':'Log in'}">${icon(state.user?'settings':'arrow')}</button></div>
   </aside>`;
 }
+function setMobileMenu(open) {
+ state.mobile=open;
+ $('.sidebar')?.classList.toggle('open',open);
+ $('.sidebar-backdrop')?.classList.toggle('visible',open);
+ $('.mobile-toggle')?.setAttribute('aria-expanded',String(open));
+ $('.mobile-toggle')?.setAttribute('aria-label',`${open?'Close':'Open'} menu`);
+}
+function closeMobileMenu(onClosed) {
+ setMobileMenu(false);
+ const sidebar=$('.sidebar');
+ if(!sidebar){onClosed();return;}
+ let finished=false;
+ const finish=()=>{
+   if(finished)return;
+   finished=true;
+   clearTimeout(timer);
+   sidebar.removeEventListener('transitionend',onTransitionEnd);
+   onClosed();
+ };
+ const onTransitionEnd=event=>{
+   if(event.target===sidebar&&event.propertyName==='transform')finish();
+ };
+ const timer=setTimeout(finish,450);
+ sidebar.addEventListener('transitionend',onTransitionEnd);
+}
 function topbarHtml() {
   const cls=currentClass();
-  return `<header class="topbar"><button class="mobile-toggle" data-action="toggle-menu" aria-label="Open menu">${icon('menu')}</button><div class="topbar-breadcrumb"><span>Your workspace</span>${icon('chevron')}<strong ${cls?'data-user-content="true"':''}>${esc(cls?.title||({progress:'My progress',settings:'Settings'}[state.view])||'My library')}</strong></div><label class="topbar-search">${icon('search')}<input id="global-search" type="search" placeholder="Find a flashcard…" aria-label="Search your library" value="${esc(state.query)}" autocomplete="off"><kbd>/</kbd></label>${statusHtml()}<span class="topbar-divider"></span>${soundButtonHtml()}<button class="topbar-help icon-btn" data-action="help" aria-label="A little help">${icon('help')}</button><button class="topbar-account" data-action="${state.user?'account':'login'}">${state.user?`<span class="avatar">${esc(state.user.email.slice(0,2).toUpperCase())}</span>`:'Log in'}</button></header>`;
+  return `<header class="topbar"><button class="mobile-toggle" data-action="toggle-menu" aria-label="${state.mobile?'Close':'Open'} menu" aria-expanded="${state.mobile}">${icon('menu')}</button><div class="topbar-breadcrumb"><span>Your workspace</span>${icon('chevron')}<strong ${cls?'data-user-content="true"':''}>${esc(cls?.title||({progress:'My progress',settings:'Settings'}[state.view])||'My library')}</strong></div><label class="topbar-search">${icon('search')}<input id="global-search" type="search" placeholder="Find a flashcard…" aria-label="Search your library" value="${esc(state.query)}" autocomplete="off"><kbd>/</kbd></label>${statusHtml()}<span class="topbar-divider"></span>${soundButtonHtml()}<button class="topbar-help icon-btn" data-action="help" aria-label="A little help">${icon('help')}</button><button class="topbar-account" data-action="${state.user?'account':'login'}">${state.user?`<span class="avatar">${esc(state.user.email.slice(0,2).toUpperCase())}</span>`:'Log in'}</button></header>`;
 }
 function contentHtml() {
   if(state.cloudLoading)return `<div class="empty-state"><div class="empty-icon">${icon('cloud')}</div><h3>Getting your cards ready…</h3><p>Opening your private study space.</p></div>`;
-  if(state.cloudError)return `<div class="empty-state"><div class="empty-icon">${icon('cloud')}</div><h3>Your library couldn’t load</h3><p>${esc(state.cloudError)}</p><button class="btn btn-blue" data-action="retry-load">Try again</button><button class="btn btn-quiet" data-action="logout">Log out</button></div>`;
-  if(state.query)return searchHtml();
-  if(state.view==='class'&&currentClass())return classHtml();
-  if(state.view==='deck'&&currentDeck())return deckHtml();
-  if(state.view==='progress')return progressHtml();
-  if(state.view==='settings')return settingsHtml();
-  return libraryHtml();
+  const cloudWarning=state.cloudError?`<div class="settings-warning" role="status"><strong>Your private library couldn’t load.</strong> ${esc(state.cloudError)} <button class="btn btn-secondary btn-sm" data-action="retry-load">Try again</button><button class="btn btn-quiet btn-sm" data-action="logout">Log out</button></div>`:'';
+  let content;
+  if(state.query)content=searchHtml();
+  else if(state.view==='class'&&currentClass())content=classHtml();
+  else if(state.view==='deck'&&currentDeck())content=deckHtml();
+  else if(state.view==='progress')content=progressHtml();
+  else if(state.view==='settings')content=settingsHtml();
+  else content=libraryHtml();
+  return `${cloudWarning}${content}`;
 }
 function renderContent() { const main=$('#main');if(main){main.innerHTML=contentHtml();localize(main,language());} }
 function footerHtml() {return `<footer class="page-footer"><span>Made for curious minds. Built for lasting knowledge.</span><span>${icon(state.user?'lock':'laptop')}${state.user?'Your library is private':'Saved on this device · sign in to sync'}</span></footer>`;}
@@ -190,14 +302,15 @@ function libraryHtml() {
 }
 function classCardHtml(cls) {
   const cards=classCards(cls), mastery=getMastery(cards);
-  return `<article class="class-card" style="${palette(cls.color)}"><div class="class-cover"><div class="cover-grain"></div><div class="cover-icon">${icon(cls.icon)}</div><div class="class-cover-copy"><h3 data-user-content="true">${esc(cls.title)}</h3><p data-user-content="true">${esc(cls.description||translateText('A new place for your next big idea.',language()))}</p></div></div><div class="class-card-body"><div class="class-card-meta"><span>${icon('book')}${cls.decks.length} ${cls.decks.length===1?'deck':'decks'}</span><span>${icon('cards')}${num(cards.length)} cards</span></div><div class="mastery-line"><span>Mastery</span><strong>${mastery}%</strong></div><div class="mastery-track"><span style="width:${mastery}%"></span></div><div class="class-card-footer"><span>${dueCount(cards)>0?`${num(dueCount(cards))} cards ready to study`:'Ready when you are'}</span>${icon('arrow')}</div></div><button class="class-card-link" data-action="class" data-id="${esc(cls.id)}" aria-label="Open ${esc(cls.title)}"></button></article>`;
+  const languagePair=['flags-en-it','flags-it-en'].includes(normalizeClassIcon(cls.icon,cls.title));
+  return `<article class="class-card" style="${palette(cls.color)}"><div class="class-cover"><div class="cover-grain"></div><div class="cover-icon${languagePair?' language-pair':''}">${classIcon(cls)}</div><div class="class-cover-copy"><h3 data-user-content="true">${esc(cls.title)}</h3><p data-user-content="true">${esc(cls.description||translateText('A new place for your next big idea.',language()))}</p></div></div><div class="class-card-body"><div class="class-card-meta"><span>${icon('book')}${cls.decks.length} ${cls.decks.length===1?'deck':'decks'}</span><span>${icon('cards')}${num(cards.length)} cards</span></div><div class="mastery-line"><span>Mastery</span><strong>${mastery}%</strong></div><div class="mastery-track"><span style="width:${mastery}%"></span></div><div class="class-card-footer"><span>${dueCount(cards)>0?`${num(dueCount(cards))} cards ready to study`:'Ready when you are'}</span>${icon('arrow')}</div></div><button class="class-card-link" data-action="class" data-id="${esc(cls.id)}" aria-label="Open ${esc(cls.title)}"></button></article>`;
 }
 function emptyHtml(title,description,label,action) {return `<div class="empty-state"><div class="empty-icon">${icon('cards')}</div><h3>${esc(title)}</h3><p>${esc(description)}</p>${label?`<button class="btn btn-primary" data-action="${action}">${icon('plus')}${esc(label)}</button>`:''}</div>`;}
 function classHtml() {
   const cls=currentClass(),cards=classCards(cls),communityClass=isCommunityClass(cls);
   const offlineEntry=communityClass?state.publicCourses.find(entry=>entry.course.id===cls.id):null;
-  const offlineStatus=offlineEntry?.offlineCacheError?'Offline copy could not be saved. Check this device’s storage.':offlineEntry?.offlineCached?'Saved on this device for offline study.':offlineEntry?.offlineSavePending?'Saving this course for offline study…':'Public course · read-only';
-  return `<button class="back-link" data-action="library">${icon('back')}Back to my library</button><div class="class-header" style="${palette(cls.color)}"><div class="cover-icon">${icon(cls.icon)}</div><div><h1>${esc(cls.title)}</h1><p>${esc(cls.description||translateText('One card closer to knowing it by heart.',language()))}</p>${communityClass?`<span class="field-hint">${esc(offlineStatus)}</span>`:''}</div><div class="heading-actions">${communityClass?'':`<button class="btn btn-secondary" data-action="edit-class">${icon('edit')}Edit class</button>`}<button class="btn btn-primary" data-action="study-class" ${!cards.length?'disabled':''}>${icon('play')}Study class</button></div></div>
+  const offlineStatus=offlineEntry?.offlineCacheError?'Offline copy could not be saved. Check this device’s storage.':offlineEntry?.progressSyncError?'Saved here; progress sync needs attention.':offlineEntry?.progressSync==='syncing'?'Saved here · syncing progress…':offlineEntry?.offlineCached&&state.user&&offlineEntry.progressSync==='synced'?'Saved offline · progress synced':offlineEntry?.offlineCached&&state.user&&!navigator.onLine?'Saved offline · progress will sync when online':offlineEntry?.offlineCached?'Saved on this device for offline study.':offlineEntry?.offlineSavePending?'Saving this course for offline study…':'Public course · read-only';
+  return `<button class="back-link" data-action="library">${icon('back')}Back to my library</button><div class="class-header" style="${palette(cls.color)}"><div class="cover-icon">${classIcon(cls)}</div><div><h1>${esc(cls.title)}</h1><p>${esc(cls.description||translateText('One card closer to knowing it by heart.',language()))}</p>${communityClass?`<span class="field-hint">${esc(offlineStatus)}${offlineEntry?.progressSyncError?' <button class="text-link" data-action="retry-course-sync">Retry sync</button>':''}</span>`:''}</div><div class="heading-actions">${communityClass?'':`<button class="btn btn-secondary" data-action="edit-class">${icon('edit')}Edit class</button>`}<button class="btn btn-primary" data-action="study-class" ${!cards.length?'disabled':''}>${icon('play')}Study class</button></div></div>
   <div class="section-heading"><h2>Your decks</h2><span class="section-count">${cls.decks.length}</span>${communityClass?'':`<div class="heading-actions push-right"><button class="btn btn-secondary btn-sm" data-action="import">${icon('upload')}Import cards</button><button class="btn btn-blue btn-sm" data-action="new-deck">${icon('plus')}Add a deck</button></div>`}</div>
   ${cls.decks.length?`<div class="deck-list">${cls.decks.map(deck=>`<div class="deck-row"><div class="deck-symbol">${icon('cards')}</div><div class="deck-info"><button class="deck-title" data-action="deck" data-id="${esc(deck.id)}">${esc(deck.title)}</button><p>${num(deck.cards.length)} cards <span aria-hidden="true">·</span> ${dueCount(deck.cards)} ready to study</p></div><div class="deck-mastery"><div class="mastery-line"><span>Mastery</span><strong>${getMastery(deck.cards)}%</strong></div><div class="mastery-track"><span style="width:${getMastery(deck.cards)}%"></span></div></div><button class="btn btn-secondary btn-sm" data-action="study-deck" data-id="${esc(deck.id)}" ${!deck.cards.length?'disabled':''}>${icon('play')}Study</button><button class="icon-btn" data-action="deck" data-id="${esc(deck.id)}" aria-label="Open ${esc(deck.title)}">${icon('chevron')}</button></div>`).join('')}</div>`:emptyHtml('A fresh start.','Create a deck to keep related flashcards together.',communityClass?'':'Add your first deck',communityClass?'':'new-deck')}
   ${cards.length?`<div class="study-note">${icon('target')}<div><strong>${getMastery(cards)}% mastered. A little further every day.</strong><p>${num(cards.length)} flashcards across ${cls.decks.length} decks, all in one place.</p></div></div>`:''}${footerHtml()}`;
@@ -454,18 +567,18 @@ function rateAnswer(rating) {
 }
 function reviewCard(rating) {
   const s=state.study;if(!s?.revealed||s.index>=s.items.length)return;
-  const {deck}=s.items[s.index], card=studyCard(),now=new Date();
+  const {cls,deck}=s.items[s.index], card=studyCard(),now=new Date();
   const updated=scheduleReview(card,rating,now);deck.cards[deck.cards.findIndex(c=>c.id===card.id)]=updated;
   const seconds=Math.min(300,Math.max(1,Math.round((Date.now()-s.lastReviewAt)/1000)));s.seconds+=seconds;s.lastReviewAt=Date.now();
   let activity=state.library.activity.find(a=>a.date===dateKey(now));if(!activity){activity={id:newId(),date:dateKey(now),cards:0,seconds:0};state.library.activity.push(activity);}activity.cards++;activity.seconds+=seconds;
-  s.ratings.push(rating);navigator.vibrate?.(10);s.index++;s.revealed=false;persist();renderStudy();
+  s.ratings.push(rating);navigator.vibrate?.(10);s.index++;s.revealed=false;persist();cachePublicCourse(cls,card.id);renderStudy();
   if(s.index>=s.items.length){sounds.play('complete');queueCloudSave();}
 }
 function summaryHtml() {
   const s=state.study,count=s.ratings.length,average=count?s.ratings.reduce((a,b)=>a+b,0)/count:0;
   return `<section class="session-summary"><div class="celebration" aria-hidden="true"><i style="--i:0"></i><i style="--i:1"></i><i style="--i:2"></i><i style="--i:3"></i><i style="--i:4"></i><i style="--i:5"></i><i style="--i:6"></i><i style="--i:7"></i><i style="--i:8"></i><i style="--i:9"></i><i style="--i:10"></i><i style="--i:11"></i></div><div class="summary-icon">${icon('check')}</div><div class="eyebrow">A LITTLE WISER THAN BEFORE</div><h1>That’s progress. Yours.</h1><div class="earned-xp">${icon('spark')} +${count*10} XP earned</div><p>A few minutes well spent.<br>The tricky cards will be here when you’re ready to meet them again.</p><div class="summary-stats"><div><strong>${count}</strong><span>Cards studied</span></div><div><strong>${Math.max(1,Math.round(s.seconds/60))} min</strong><span>Time invested</span></div><div><strong>${average.toFixed(1)} / 5</strong><span>Avg. confidence</span></div></div><div class="summary-actions"><button class="btn btn-secondary" data-action="exit-study">Back to my library</button><button class="btn btn-primary" data-action="study-again">Keep learning ${icon('arrow')}</button></div></section>`;
 }
-function exitStudy() {state.study=null;render();window.scrollTo({top:0,behavior:'instant'});}
+function exitStudy() {state.study=null;render();window.scrollTo({top:0,behavior:'instant'});if(navigator.onLine){if(state.user)loadPublicCoursesOfflineFirst(state.user.id);else initCloud();}}
 function resumeLastStudy() {
   const {scope,scopeId}=resolveStudyScope(state.library,readLastStudy());
   startStudy(scope,scopeId);
@@ -475,7 +588,8 @@ async function activateUser(user,force=false) {
   if(!user)return;
   if(!force&&boundUserId===user.id)return;
   boundUserId=user.id;const generation=++authGeneration;clearTimeout(cloudTimer);closeModal();state.importDraft=null;state.pendingConflict=null;
-  state.user=user;state.cloudReady=false;state.cloudLoading=true;state.cloudError='';state.sync='loading';state.study=null;state.dirty=false;state.revision=0;state.library=emptyLibrary();render();
+  state.user=user;state.publicCourses=[];state.cloudReady=false;state.cloudLoading=true;state.cloudError='';state.sync='loading';state.study=null;state.dirty=false;state.revision=0;state.library=emptyLibrary();render();
+  loadPublicCoursesOfflineFirst(user.id);
   try {
     const remote=await loadCloudLibrary(user.id);if(generation!==authGeneration)return;
     const cloudLibrary=remote?validateLibrary(remote):null,localLibrary=readLocal(user.id),localSync=readLocalSync(user.id);
@@ -489,6 +603,7 @@ async function activateUser(user,force=false) {
     if(state.dirty)await queueCloudSave();
     else if(!remote){await queueCloudSave();if(generation!==authGeneration)return;const guest=readLocal();if(guest?.classes.length&&!localLibrary?.classes.length)offerGuestImport(guest);}
   }catch(error){if(generation!==authGeneration)return;state.cloudLoading=false;state.cloudError=error.message||'Please check your connection and try again.';state.sync='error';render();}
+  finally{if(generation===authGeneration)syncAllPublicCourseProgress();}
 }
 function resolveLibraryConflict(localLibrary,cloudLibrary,userId,generation) {
   const describe=library=>`${library.classes.length} classes, ${library.classes.flatMap(c=>c.decks.flatMap(d=>d.cards)).length} cards`;
@@ -512,18 +627,54 @@ async function logout() {
   }catch(error){toast(error.message||'Couldn’t log out. Please try again.',true);if(button?.isConnected)button.disabled=false;}
 }
 function resetGuest() {
-  authGeneration++;boundUserId=null;clearTimeout(cloudTimer);closeModal();state.importDraft=null;state.pendingConflict=null;state.dirty=false;state.revision=0;state.user=null;state.cloudReady=false;state.cloudLoading=false;state.cloudError='';state.sync='local';state.library=readLocal()||exampleLibrary();state.study=null;state.query='';state.view='library';state.classId=null;state.deckId=null;render();
+  authGeneration++;boundUserId=null;clearTimeout(cloudTimer);closeModal();state.importDraft=null;state.pendingConflict=null;state.dirty=false;state.revision=0;state.user=null;state.publicCourses=[];state.cloudReady=false;state.cloudLoading=false;state.cloudError='';state.sync='local';state.library=readLocal()||exampleLibrary();state.study=null;state.query='';state.view='library';state.classId=null;state.deckId=null;render();loadPublicCoursesOfflineFirst('guest');
 }
-async function initCloud() {
+async function loadPublicCoursesOfflineFirst(progressOwner=state.user?.id||'guest') {
+  const generation=++publicCoursesLoadGeneration;
+  const cachedCourses=await loadCachedPublicCourses(progressOwner).catch(error=>{
+    console.warn('Saved public courses could not be loaded:',error.message);
+    state.publicCoursesError='Saved public courses could not be loaded from this device.';
+    return [];
+  });
+  if(generation!==publicCoursesLoadGeneration)return;
+  if(state.study)return;
+  state.publicCourses=cachedCourses;
+  renderContent();
   if(!isCloudConfigured())return;
-  loadPublicCourses().then(courses=>{state.publicCourses=courses;state.publicCoursesError='';renderContent();}).catch(error=>{state.publicCoursesError=error.message||'Could not load public courses.';renderContent();console.error('Public courses could not load:',error.message);});
+  try {
+    const courses=await loadPublicCourses();
+    if(generation!==publicCoursesLoadGeneration)return;
+    if(state.study)return;
+    const cachedById=new Map(cachedCourses.map(entry=>[entry.course.id,entry]));
+    const refreshed=courses.map(entry=>mergeCachedCourse(entry,cachedById.get(entry.course.id)));
+    const refreshedIds=new Set(refreshed.map(entry=>entry.course.id));
+    state.publicCourses=[...refreshed,...cachedCourses.filter(entry=>!refreshedIds.has(entry.course.id))];
+    state.publicCoursesError='';
+    for(const entry of refreshed)if(entry.offlineCached)cachePublicCourse(entry.course);
+  }catch(error){
+    if(generation!==publicCoursesLoadGeneration)return;
+    state.publicCoursesError=error.message||'Could not load public courses.';
+    console.error('Public courses could not load:',error.message);
+  }
+  if(generation!==publicCoursesLoadGeneration)return;
+  renderContent();
+  if(state.view==='class')cachePublicCourse(currentClass());
+  syncAllPublicCourseProgress();
+}
+
+async function initCloud() {
+  loadPublicCoursesOfflineFirst();
+  if(!isCloudConfigured())return;
   try {
     const client=await getCloudClient();
-    client.auth.onAuthStateChange((event,session)=>{
-      if(event==='PASSWORD_RECOVERY'){setTimeout(()=>{if(session?.user)activateUser(session.user);authModal('reset');},0);return;}
-      if(event==='SIGNED_OUT'){setTimeout(resetGuest,0);return;}
-      if(session?.user&&boundUserId!==session.user.id)setTimeout(()=>activateUser(session.user),0);
-    });
+    if(!authListenerBound){
+      client.auth.onAuthStateChange((event,session)=>{
+        if(event==='PASSWORD_RECOVERY'){setTimeout(()=>{if(session?.user)activateUser(session.user);authModal('reset');},0);return;}
+        if(event==='SIGNED_OUT'){setTimeout(resetGuest,0);return;}
+        if(session?.user&&boundUserId!==session.user.id)setTimeout(()=>activateUser(session.user),0);
+      });
+      authListenerBound=true;
+    }
     const {data,error}=await client.auth.getSession();if(error)throw error;if(data.session?.user)await activateUser(data.session.user);
   }catch(error){toast('Accounts couldn’t connect. Local study is still available. '+error.message,true);}
 }
@@ -544,18 +695,19 @@ const actions = {
   'toggle-sound':toggleSound,
   library:()=>navigate(),progress:()=>navigate('progress'),settings:()=>navigate('settings'),class:el=>{state.filter='all';navigate('class',el.dataset.id);},deck:el=>{state.filter='all';navigate('deck',state.classId,el.dataset.id);},
   'search-result':el=>navigate('deck',el.dataset.class,el.dataset.id),'clear-search':()=>{state.query='';$('#global-search').value='';renderContent();},
-  'toggle-menu':()=>{state.mobile=!state.mobile;render();},'new-class':()=>classModal(),'edit-class':()=>classModal(true),'new-deck':()=>deckModal(),'edit-deck':()=>deckModal(true),'new-card':()=>cardModal(),'edit-card':el=>cardModal(el.dataset.id),
+  'toggle-menu':()=>setMobileMenu(!state.mobile),'new-class':()=>classModal(),'edit-class':()=>classModal(true),'new-deck':()=>deckModal(),'edit-deck':()=>deckModal(true),'new-card':()=>cardModal(),'edit-card':el=>cardModal(el.dataset.id),
   'choose-color':el=>{const name=el.dataset.color;$('#class-color').value=name;document.querySelectorAll('.color-option').forEach(b=>{const selected=b.dataset.color===name;b.classList.toggle('selected',selected);b.setAttribute('aria-pressed',selected);b.innerHTML=selected?icon('check'):'';});},
   'delete-class':()=>{const cls=currentClass();confirmModal('Let this class go?',`“${cls.title}” and all its decks and cards will be deleted. Export a backup first if you want to keep a copy.`,()=>{state.library.classes=state.library.classes.filter(c=>c.id!==cls.id);persist();navigate();toast('Class deleted.');});},
   'delete-deck':()=>{const cls=currentClass(),deck=currentDeck();confirmModal('Let this deck go?',`“${deck.title}” and its ${deck.cards.length} cards will be deleted.`,()=>{cls.decks=cls.decks.filter(d=>d.id!==deck.id);persist();navigate('class',cls.id);toast('Deck deleted.');});},
   'delete-card':el=>{const deck=currentDeck(),id=el.dataset.id;confirmModal('Let this card go?','This flashcard and its study progress will be deleted.',()=>{deck.cards=deck.cards.filter(c=>c.id!==id);persist();renderContent();toast('Card deleted.');});},
   'star-card':el=>{const card=currentDeck()?.cards.find(c=>c.id===el.dataset.id);if(card){card.starred=!card.starred;persist();renderContent();}},
-  'star-study':()=>{const card=studyCard();if(card){card.starred=!card.starred;persist();renderStudy();}},
+  'star-study':()=>{const s=state.study,card=studyCard();if(card){card.starred=!card.starred;persist();cachePublicCourse(s.items[s.index].cls,card.id);renderStudy();}},
   'more-cards':()=>{state.visibleCards+=100;renderContent();},
   import:()=>importModal(),'import-back':()=>importModal(true),'confirm-import':finishImport,'load-brainscape':loadBrainscapePack,
   login:()=>authModal(),'signup':()=>authModal('signup'),'forgot-password':()=>authModal('forgot'),account:accountModal,logout,
   'settings-from-modal':()=>{closeModal();navigate('settings');},'close-modal':closeModal,help:helpModal,
   'study-all':resumeLastStudy,'study-class':()=>startStudy('class',state.classId),'study-deck':el=>startStudy('deck',el.dataset.id||state.deckId),
+  'retry-course-sync':()=>{const entry=state.publicCourses.find(item=>item.course.id===state.classId);if(entry)return runCourseProgressSync(entry);},
   reveal:revealAnswer,rate:el=>rateAnswer(Number(el.dataset.rating)),'exit-study':exitStudy,
   'study-again':()=>{const s=state.study;state.study=null;startStudy(s.scope,s.scopeId);},
   'save-goal':()=>{const value=Number($('#daily-goal').value);if(!Number.isInteger(value)||value<5||value>500)return toast('Choose a daily goal between 5 and 500 cards.',true);state.library.settings.dailyGoal=value;persist();render();toast('A little goal, made for you.');},
@@ -620,10 +772,25 @@ document.addEventListener('keydown',event=>{
   if(event.target.matches('input,textarea,select,[contenteditable]'))return;
   if(state.study){if(event.code==='Space'&&!event.target.closest('button,a')&&!state.study.revealed&&studyCard()){event.preventDefault();revealAnswer();}else if(/^[1-5]$/.test(event.key)&&state.study.revealed){event.preventDefault();rateAnswer(Number(event.key));}else if(event.key==='Escape')exitStudy();}
   else if(event.key==='/'&&!event.metaKey&&!event.ctrlKey){event.preventDefault();$('#global-search')?.focus();}
-  else if(event.key==='Escape'&&state.mobile){state.mobile=false;render();}
+  else if(event.key==='Escape'&&state.mobile)setMobileMenu(false);
 });
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){sounds.stop();if(state.user&&state.sync==='saving')queueCloudSave();}});
-window.addEventListener('online',()=>{if(state.user&&state.sync==='error')queueCloudSave();});
+window.addEventListener('online',()=>{
+  if(state.study){
+    if(state.user){
+      if(state.cloudError)activateUser(state.user,true);
+      else if(state.sync==='error')queueCloudSave();
+      syncAllPublicCourseProgress();
+    }
+    return;
+  }
+  loadPublicCoursesOfflineFirst(state.user?.id||'guest');
+  if(state.user){
+    if(state.cloudError)activateUser(state.user,true);
+    else if(state.sync==='error')queueCloudSave();
+    syncAllPublicCourseProgress();
+  }else initCloud();
+});
 window.addEventListener('beforeunload',event=>{if(state.user&&state.sync==='saving'){event.preventDefault();event.returnValue='';}});
 
 render();

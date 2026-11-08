@@ -59,6 +59,44 @@ create policy "Read public courses" on public.public_courses
   for select to anon, authenticated
   using (data ->> 'visibility' = 'public');
 
+create table if not exists public.course_progress (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  course_id text not null,
+  card_id text not null,
+  progress jsonb not null,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, course_id, card_id),
+  constraint course_progress_is_object check (jsonb_typeof(progress) = 'object')
+);
+
+alter table public.course_progress enable row level security;
+alter table public.course_progress force row level security;
+
+revoke all on table public.course_progress from anon;
+revoke all on table public.course_progress from authenticated;
+grant select, insert, update, delete on table public.course_progress to authenticated;
+
+drop policy if exists "Read own course progress" on public.course_progress;
+create policy "Read own course progress" on public.course_progress
+  for select to authenticated
+  using ((select auth.uid()) = user_id);
+
+drop policy if exists "Create own course progress" on public.course_progress;
+create policy "Create own course progress" on public.course_progress
+  for insert to authenticated
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Update own course progress" on public.course_progress;
+create policy "Update own course progress" on public.course_progress
+  for update to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Delete own course progress" on public.course_progress;
+create policy "Delete own course progress" on public.course_progress
+  for delete to authenticated
+  using ((select auth.uid()) = user_id);
+
 create or replace function public.set_library_updated_at()
 returns trigger
 language plpgsql

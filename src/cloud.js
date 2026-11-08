@@ -14,6 +14,22 @@ function cloudConfig() {
   };
 }
 
+function normalizeCourseProgress(progress) {
+  if (!progress || typeof progress !== 'object' ||
+      !Number.isInteger(progress.confidence) || progress.confidence < 0 || progress.confidence > 5 ||
+      !Number.isInteger(progress.reviewCount) || progress.reviewCount < 0 || progress.reviewCount > 1_000_000 ||
+      typeof progress.starred !== 'boolean') return null;
+  const validTime = value => value === null || (typeof value === 'string' && Number.isFinite(Date.parse(value)));
+  if (!validTime(progress.dueAt) || !validTime(progress.reviewedAt)) return null;
+  return {
+    confidence: progress.confidence,
+    dueAt: progress.dueAt ? new Date(progress.dueAt).toISOString() : null,
+    reviewedAt: progress.reviewedAt ? new Date(progress.reviewedAt).toISOString() : null,
+    reviewCount: progress.reviewCount,
+    starred: progress.starred,
+  };
+}
+
 export function isCloudConfigured() {
   const { url, key } = cloudConfig();
   if (!url || !key) return false;
@@ -127,6 +143,59 @@ export async function loadPublicCourses() {
     course.id = `${row.owner_id}:${row.course_id}`;
     return { ownerId: row.owner_id, course };
   });
+}
+
+export async function syncPublicCourseProgress(userId, courseId, localProgress) {
+  if (!userId) throw new Error('Sign in before syncing public course progress.');
+  if (typeof courseId !== 'string' || !courseId || !Array.isArray(localProgress)) {
+    throw new Error('Public course progress is invalid and could not be synced.');
+  }
+  const client = await getCloudClient();
+  const { data, error } = await client
+    .from('course_progress')
+    .select('card_id,progress,updated_at')
+    .eq('user_id', userId)
+    .eq('course_id', courseId);
+  if (error) throw new Error(`Could not load your course progress: ${error.message}`);
+  const merged = new Map();
+  for (const row of data || []) {
+    const progress = normalizeCourseProgress(row.progress);
+    if (typeof row.card_id !== 'string' || !row.card_id || !progress || !Number.isFinite(Date.parse(row.updated_at))) {
+      throw new Error('Your saved course progress has invalid data and was not changed.');
+    }
+    merged.set(row.card_id, { cardId: row.card_id, progress, updatedAt: new Date(row.updated_at).toISOString() });
+  }
+  const uploads = [];
+  for (const item of localProgress) {
+    if (!item || typeof item.cardId !== 'string' || !item.cardId ||
+        !item.progress || typeof item.progress !== 'object' ||
+        !Number.isFinite(Date.parse(item.updatedAt))) {
+      throw new Error('Public course progress is invalid and could not be synced.');
+    }
+    const progress = normalizeCourseProgress(item.progress);
+    if (!progress) throw new Error('Public course progress is invalid and could not be synced.');
+    const saved = merged.get(item.cardId);
+    const updatedAt = new Date(item.updatedAt).toISOString();
+    if (!saved || Date.parse(updatedAt) > Date.parse(saved.updatedAt) ||
+        (Date.parse(updatedAt) === Date.parse(saved.updatedAt) &&
+            JSON.stringify(progress) !== JSON.stringify(saved.progress))) {
+      uploads.push({
+        user_id: userId,
+        course_id: courseId,
+        card_id: item.cardId,
+        progress,
+        updated_at: updatedAt,
+      });
+      merged.set(item.cardId, { cardId: item.cardId, progress, updatedAt });
+    }
+  }
+  if (uploads.length) {
+    const { error: saveError } = await client
+      .from('course_progress')
+      .upsert(uploads, { onConflict: 'user_id,course_id,card_id' });
+    if (saveError) throw new Error(`Could not save your course progress: ${saveError.message}`);
+  }
+  return [...merged.values()];
 }
 
 export async function saveCloudLibrary(userId, library) {

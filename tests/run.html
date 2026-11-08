@@ -8,12 +8,14 @@
 <script type="module">
 import { parseImport, toCsv } from '../src/importer.js';
 import { dateKey, getMastery, getStreak, resolveStudyScope, scheduleReview, selectStudyCards } from '../src/study.js';
+import { loadCachedPublicCourses, mergeCachedCourse, saveCachedPublicCourse } from '../src/offline-courses.js';
 const output = document.querySelector('#results');
 const lines = [];
+const pending = [];
 let failures = 0;
 const equal = (actual, expected) => { if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`Expected ${JSON.stringify(expected)}; got ${JSON.stringify(actual)}`); };
 const throws = fn => { let failed = false; try { fn(); } catch { failed = true; } if (!failed) throw new Error('Expected an error'); };
-function test(name, run) { try { run(); lines.push(`PASS ${name}`); } catch (error) { failures++; lines.push(`FAIL ${name}: ${error.message}`); } }
+function test(name, run) { try { const result=run();if(result&&typeof result.then==='function')pending.push(Promise.resolve(result).then(()=>lines.push(`PASS ${name}`)).catch(error=>{failures++;lines.push(`FAIL ${name}: ${error.message}`);}));else lines.push(`PASS ${name}`); } catch (error) { failures++; lines.push(`FAIL ${name}: ${error.message}`); } }
 test('Quoted multiline CSV', () => equal(parseImport('\uFEFFquestion,answer\r\n"A, B","one ""quote""\nsecond line"').cards, [{question:'A, B',answer:'one "quote"\nsecond line'}]));
 test('TSV detection', () => equal(parseImport('Hello\tCiao').format, 'tsv'));
 test('TSV answer may contain a comma', () => equal(parseImport('Hello\tCiao, or goodbye').cards, [{question:'Hello',answer:'Ciao, or goodbye'}]));
@@ -46,6 +48,45 @@ test('Last study scope resumes a populated class or deck and falls back to all',
 test('Mastery includes unseen cards', () => equal(getMastery([{confidence:5},{confidence:0}]),50));
 test('Local date key', () => equal(dateKey(new Date(2026,10,7,12)),'2026-11-07'));
 test('Yesterday maintains streak', () => equal(getStreak([{date:'2026-11-06',cards:1},{date:'2026-11-05',cards:2}],new Date(2026,10,7,12)),2));
+test('Offline course refresh retains this device’s review progress', () => {
+  const course = (answer, confidence) => ({ownerId:'owner',course:{id:'course',title:'Italian',description:'',color:'blue',icon:'globe',visibility:'public',createdAt:'2026-11-01T10:00:00.000Z',decks:[{id:'deck',title:'Greetings',createdAt:'2026-11-01T11:00:00.000Z',cards:[{id:'card',question:'Ciao?',answer,confidence,reviewCount:confidence,dueAt:null,reviewedAt:null,starred:confidence>0}]}]}});
+  const cached = course('Old answer',4);
+  cached.offlineCached = true;
+  cached.progress = {card:{confidence:4,dueAt:null,reviewedAt:'2026-11-07T10:00:00.000Z',reviewCount:4,starred:true,updatedAt:'2026-11-07T10:00:00.000Z'}};
+  const merged = mergeCachedCourse(course('Fresh answer',0),cached);
+  equal([merged.offlineCached,merged.course.decks[0].cards[0].answer,merged.course.decks[0].cards[0].confidence],[true,'Fresh answer',4]);
+});
+test('Newer cloud course progress takes precedence over an older offline copy', () => {
+  const cached = {ownerId:'owner',course:{id:'course',decks:[{cards:[]} ]},progress:{card:{confidence:2,dueAt:null,reviewedAt:null,reviewCount:2,starred:false,updatedAt:'2026-11-07T10:00:00.000Z'}},offlineCached:true};
+  const remote = {ownerId:'owner',course:{id:'course',title:'Italian',description:'',color:'blue',icon:'globe',visibility:'public',createdAt:'2026-11-01T10:00:00.000Z',decks:[{id:'deck',title:'Greetings',createdAt:'2026-11-01T11:00:00.000Z',cards:[{id:'card',question:'Ciao?',answer:'Hello',confidence:0,reviewCount:0,dueAt:null,reviewedAt:null,starred:false}]}]}};
+  const merged = mergeCachedCourse(remote,cached,[{cardId:'card',progress:{confidence:4,dueAt:null,reviewedAt:null,reviewCount:4,starred:true},updatedAt:'2026-11-08T10:00:00.000Z'}]);
+  equal(merged.course.decks[0].cards[0].confidence,4);
+});
+test('Offline course progress stays isolated between signed-in accounts', async () => {
+  const courseId=`offline-test-${crypto.randomUUID()}`,cardId=`${courseId}-card`,deckId=`${courseId}-deck`;
+  const entry={ownerId:'owner',course:{id:courseId,title:'Offline test',description:'',color:'blue',icon:'book',visibility:'public',createdAt:'2026-11-01T10:00:00.000Z',decks:[{id:deckId,title:'Test deck',createdAt:'2026-11-01T11:00:00.000Z',cards:[{id:cardId,question:'Question',answer:'Answer',confidence:0,reviewCount:0,dueAt:null,reviewedAt:null,starred:false}]}]}};
+  try {
+    await saveCachedPublicCourse(entry,{userId:'user-a'});
+    const userA=(await loadCachedPublicCourses('user-a')).find(item=>item.course.id===courseId);
+    userA.course.decks[0].cards[0].confidence=3;
+    userA.course.decks[0].cards[0].reviewCount=1;
+    userA.course.decks[0].cards[0].reviewedAt=new Date().toISOString();
+    await saveCachedPublicCourse(userA,{userId:'user-a',touchedCardId:cardId});
+    const userB=(await loadCachedPublicCourses('user-b')).find(item=>item.course.id===courseId);
+    userB.course.decks[0].cards[0].confidence=2;
+    userB.course.decks[0].cards[0].reviewCount=1;
+    userB.course.decks[0].cards[0].reviewedAt=new Date().toISOString();
+    await saveCachedPublicCourse(userB,{userId:'user-b',touchedCardId:cardId});
+    const savedA=(await loadCachedPublicCourses('user-a')).find(item=>item.course.id===courseId);
+    const savedB=(await loadCachedPublicCourses('user-b')).find(item=>item.course.id===courseId);
+    equal([savedA.course.decks[0].cards[0].confidence,savedB.course.decks[0].cards[0].confidence],[3,2]);
+  } finally {
+    const db=await new Promise((resolve,reject)=>{const request=indexedDB.open('flashlang-offline-courses',1);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+    await new Promise((resolve,reject)=>{const transaction=db.transaction('courses','readwrite');transaction.objectStore('courses').delete(courseId);transaction.oncomplete=resolve;transaction.onerror=()=>reject(transaction.error);});
+    db.close();
+  }
+});
+await Promise.all(pending);
 lines.push(`\n${lines.length - failures} passed; ${failures} failed.`);
 output.textContent = lines.join('\n');
 output.className = failures ? 'fail' : 'pass';
