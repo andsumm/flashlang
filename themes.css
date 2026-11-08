@@ -200,7 +200,7 @@ button{-webkit-appearance:none;appearance:none}
     min-height:43px;
     gap:3px;
     border-radius:14px;
-    font-size:9px;
+    font-size:10px;
     transition:background-color .2s,color .2s,transform .2s var(--ease),box-shadow .2s;
   }
   .mobile-nav>button .icon{width:17px;height:17px;transition:transform .2s var(--ease)}
