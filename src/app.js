@@ -1,5 +1,5 @@
 import { icon } from './icons.js';
-import { exampleLibrary, emptyLibrary, newId, newCard, validateLibrary, normalizeClassIcon, normalizeSpeechLanguage, speechLanguages } from './data.js';
+import { exampleLibrary, emptyLibrary, newId, newCard, validateLibrary, updateEnglishCourse, normalizeClassIcon, normalizeSpeechLanguage, speechLanguages } from './data.js';
 import { parseImport, toCsv } from './importer.js';
 import { scheduleReview, selectStudyCards, resolveStudyScope, getMastery, dateKey } from './study.js';
 import { getStudyStats } from './stats.js';
@@ -38,6 +38,7 @@ const state = {library:initialLibrary||exampleLibrary(),publicCourses:[],publicC
 let toastTimer, cloudTimer, syncChain=Promise.resolve(), syncGeneration=0, authGeneration=0, publicCoursesLoadGeneration=0, lastFocus, boundUserId, authListenerBound=false;
 const courseWrites=new WeakMap(), courseSyncs=new WeakMap(), courseSyncTimers=new WeakMap();
 let storageWarningShown=false;
+if (updateEnglishCourse(state.library)) writeLocal();
 const sounds = createSoundFeedback();
 const speech = createSpeechController(globalThis,{onError:()=>toast('Couldn’t play the answer audio. Try again.',true)});
 
@@ -628,26 +629,30 @@ async function activateUser(user,force=false) {
   try {
     const remote=await loadCloudLibrary(user.id);if(generation!==authGeneration)return;
     const cloudLibrary=remote?validateLibrary(remote):null,localLibrary=readLocal(user.id),localSync=readLocalSync(user.id);
+    const cloudCourseUpdated=cloudLibrary?updateEnglishCourse(cloudLibrary):false;
+    const localCourseUpdated=localLibrary?updateEnglishCourse(localLibrary):false;
     state.revision=localSync.revision;
     if(localSync.dirty&&localLibrary&&cloudLibrary&&JSON.stringify(localLibrary)!==JSON.stringify(cloudLibrary)){
       state.library=localLibrary;state.dirty=true;state.cloudLoading=false;state.sync='error';render();
-      resolveLibraryConflict(localLibrary,cloudLibrary,user.id,generation);return;
+      resolveLibraryConflict(localLibrary,cloudLibrary,user.id,generation,cloudCourseUpdated);return;
     }
     state.library=localSync.dirty&&localLibrary?localLibrary:(cloudLibrary||localLibrary||emptyLibrary());
-    state.dirty=localSync.dirty&&!cloudLibrary;state.cloudReady=true;state.cloudLoading=false;state.sync=state.dirty?'saving':'synced';writeLocal();render();
+    const selectedCourseUpdated=state.library===localLibrary?localCourseUpdated:
+      state.library===cloudLibrary?cloudCourseUpdated:updateEnglishCourse(state.library);
+    state.dirty=(localSync.dirty&&!cloudLibrary)||selectedCourseUpdated;state.cloudReady=true;state.cloudLoading=false;state.sync=state.dirty?'saving':'synced';writeLocal();render();
     if(state.dirty)await queueCloudSave();
     else if(!remote){await queueCloudSave();if(generation!==authGeneration)return;const guest=readLocal();if(guest?.classes.length&&!localLibrary?.classes.length)offerGuestImport(guest);}
   }catch(error){if(generation!==authGeneration)return;state.cloudLoading=false;state.cloudError=error.message||'Please check your connection and try again.';state.sync='error';render();}
   finally{if(generation===authGeneration)syncAllPublicCourseProgress();}
 }
-function resolveLibraryConflict(localLibrary,cloudLibrary,userId,generation) {
+function resolveLibraryConflict(localLibrary,cloudLibrary,userId,generation,cloudNeedsSave=false) {
   const describe=library=>`${library.classes.length} classes, ${library.classes.flatMap(c=>c.decks.flatMap(d=>d.cards)).length} cards`;
   showModal('Some cards are waiting to sync.','This device has changes that didn’t reach your account.',`<div class="setup-notice"><strong>On this device: ${describe(localLibrary)}</strong><p>In your account: ${describe(cloudLibrary)}. Choose the library you want to keep. Keeping this device’s library replaces the account copy; using the account copy replaces this device’s copy.</p></div><button class="text-link small" id="download-unsynced">Download this device’s backup first</button><div class="form-actions"><button class="btn btn-secondary" id="use-cloud-library">Use account copy</button><button class="btn btn-primary" id="use-local-library">Keep this device’s changes</button></div>`);
   $('#download-unsynced').onclick=()=>download(`recall-unsynced-${dateKey()}.json`,JSON.stringify(localLibrary,null,2),'application/json');
-  const choose=async local=>{if(generation!==authGeneration||state.user?.id!==userId)return;state.library=local?localLibrary:cloudLibrary;state.cloudReady=true;state.pendingConflict=null;state.dirty=local;state.sync=local?'saving':'synced';writeLocal();closeModal();render();if(local)await queueCloudSave();};
+  const choose=async local=>{if(generation!==authGeneration||state.user?.id!==userId)return;state.library=local?localLibrary:cloudLibrary;state.cloudReady=true;state.pendingConflict=null;state.dirty=local||(!local&&cloudNeedsSave);state.sync=state.dirty?'saving':'synced';writeLocal();closeModal();render();if(state.dirty)await queueCloudSave();};
   $('#use-cloud-library').onclick=()=>choose(false);$('#use-local-library').onclick=()=>choose(true);
   // Leave the local copy available if the dialog is dismissed. Settings offers a way back.
-  state.pendingConflict={localLibrary,cloudLibrary,userId,generation};
+  state.pendingConflict={localLibrary,cloudLibrary,userId,generation,cloudNeedsSave};
 }
 function offerGuestImport(guest) {
   showModal('Your cards can come too.','There’s already a library saved on this device.',`<div class="setup-notice"><strong>${guest.classes.length} ${guest.classes.length===1?'class':'classes'} · ${guest.classes.flatMap(c=>c.decks.flatMap(d=>d.cards)).length} flashcards</strong><p>Bring these classes and their study progress into your new private account, or start with a clean space.</p></div><div class="form-actions"><button class="btn btn-secondary" data-action="close-modal">Start fresh</button><button class="btn btn-primary" id="bring-guest">Bring my cards ${icon('arrow')}</button></div>`);
@@ -749,7 +754,7 @@ const actions = {
   backup:()=>{download(`recall-backup-${dateKey()}.json`,JSON.stringify(state.library,null,2),'application/json');toast('Your backup is ready. Keep it somewhere safe.');},
   'export-deck':()=>{const deck=currentDeck();download(`${deck.title.replace(/[^a-z0-9_-]/gi,'-')}.csv`,toCsv(deck.cards),'text/csv;charset=utf-8');toast('Your deck is ready to take with you.');},
   'add-examples':()=>{const examples=exampleLibrary();const existing=new Set(state.library.classes.map(c=>c.title));const additions=examples.classes.filter(c=>!existing.has(c.title));if(!additions.length)return toast('Your example classes are already here.');state.library.classes.push(...additions);persist();render();toast('A little inspiration, added to your library.');},
-  'retry-sync':()=>{if(state.pendingConflict){const p=state.pendingConflict;return resolveLibraryConflict(state.library,p.cloudLibrary,p.userId,p.generation);}state.sync='saving';renderContent();updateStatus();queueCloudSave();},'retry-load':()=>activateUser(state.user,true)
+  'retry-sync':()=>{if(state.pendingConflict){const p=state.pendingConflict;return resolveLibraryConflict(state.library,p.cloudLibrary,p.userId,p.generation,p.cloudNeedsSave);}state.sync='saving';renderContent();updateStatus();queueCloudSave();},'retry-load':()=>activateUser(state.user,true)
 };
 
 document.addEventListener('click',event=>{

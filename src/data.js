@@ -162,6 +162,43 @@ export function exampleLibrary() {
   return library;
 }
 
+export function updateEnglishCourse(library) {
+  const currentCourse = exampleLibrary().classes.find(cls=>cls.title==='Inglese');
+  const existingCourse = library.classes.find(cls=>cls.title==='Inglese');
+  if (!existingCourse) {
+    library.classes.push(currentCourse);
+    return true;
+  }
+
+  const existingDecks = new Map(existingCourse.decks.map(deck=>[deck.title,deck]));
+  const decks = currentCourse.decks.map(deck=>{
+    const existingDeck = existingDecks.get(deck.title);
+    if (!existingDeck) return deck;
+    const existingCards = new Map(existingDeck.cards.map(card=>[card.question,card]));
+    return {
+      ...deck,
+      id: existingDeck.id,
+      createdAt: existingDeck.createdAt,
+      cards: deck.cards.map(card=>{
+        const existingCard = existingCards.get(card.question);
+        return existingCard ? {
+          ...card,
+          id: existingCard.id,
+          confidence: existingCard.confidence,
+          dueAt: existingCard.dueAt,
+          reviewedAt: existingCard.reviewedAt,
+          reviewCount: existingCard.reviewCount,
+          starred: existingCard.starred,
+        } : card;
+      }),
+    };
+  });
+  const updatedCourse = { ...existingCourse, description: currentCourse.description, decks };
+  if (JSON.stringify(existingCourse) === JSON.stringify(updatedCourse)) return false;
+  Object.assign(existingCourse, updatedCourse);
+  return true;
+}
+
 // Validate imported backups before they reach rendering or cloud persistence.
 export function validateLibrary(value) {
   if (!value || value.version !== 1 || !Array.isArray(value.classes) || value.classes.length > 500) throw new Error('This is not a valid Flashlang backup.');

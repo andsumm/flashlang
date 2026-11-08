@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateLibrary, emptyLibrary, exampleLibrary, newCard, normalizeClassIcon, normalizeSpeechLanguage } from '../src/data.js';
+import { validateLibrary, emptyLibrary, exampleLibrary, newCard, normalizeClassIcon, normalizeSpeechLanguage, updateEnglishCourse } from '../src/data.js';
 
 function backup() {
   return {
@@ -283,4 +283,43 @@ test('default examples include one expanded Inglese course with unique-prompt le
   assert.equal(new Set(prompts).size, prompts.length);
   assert.ok(!course.decks.flatMap(deck => deck.cards).some(card => /vertical|serif|kerning|x-height/i.test(`${card.question} ${card.answer}`)));
   assert.ok(!library.classes.find(item => item.title === 'Design fundamentals').decks.some(deck => deck.title === 'Color & typography'));
+});
+
+test('Inglese course updates replace the official card set and preserve progress for unchanged cards', () => {
+  const library = exampleLibrary();
+  const course = library.classes.find(item => item.title === 'Inglese');
+  const deck = course.decks[0];
+  const reviewedCard = deck.cards[0];
+  reviewedCard.confidence = 4;
+  reviewedCard.reviewCount = 8;
+  reviewedCard.dueAt = '2026-11-10T10:00:00.000Z';
+  reviewedCard.reviewedAt = '2026-11-07T10:00:00.000Z';
+  reviewedCard.starred = true;
+  const reviewedCardId = reviewedCard.id;
+  deck.cards.push({ ...reviewedCard, id: 'outdated-card', question: 'Outdated question', answer: 'Outdated answer' });
+  deck.cards = deck.cards.filter(card => card.question !== 'Buona serata!');
+
+  assert.equal(updateEnglishCourse(library), true);
+
+  const updatedDeck = course.decks[0];
+  const preservedCard = updatedDeck.cards.find(card => card.question === 'Salve!');
+  assert.equal(updatedDeck.cards.length, 8);
+  assert.equal(updatedDeck.cards.some(card => card.question === 'Outdated question'), false);
+  assert.equal(updatedDeck.cards.some(card => card.question === 'Buona serata!'), true);
+  assert.equal(preservedCard.id, reviewedCardId);
+  assert.deepEqual(
+    [preservedCard.confidence, preservedCard.reviewCount, preservedCard.dueAt, preservedCard.reviewedAt, preservedCard.starred],
+    [4, 8, '2026-11-10T10:00:00.000Z', '2026-11-07T10:00:00.000Z', true],
+  );
+  assert.equal(course.decks.length, 31);
+  assert.equal(updateEnglishCourse(library), false);
+});
+
+test('Inglese course is added to accounts that do not already have it', () => {
+  const library = emptyLibrary();
+
+  assert.equal(updateEnglishCourse(library), true);
+  assert.equal(library.classes.filter(item => item.title === 'Inglese').length, 1);
+  assert.equal(library.classes[0].decks.length, 31);
+  assert.equal(updateEnglishCourse(library), false);
 });

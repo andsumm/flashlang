@@ -9,6 +9,7 @@
 import { parseImport, toCsv } from '../src/importer.js';
 import { dateKey, getMastery, getStreak, resolveStudyScope, scheduleReview, selectStudyCards } from '../src/study.js';
 import { loadCachedPublicCourses, mergeCachedCourse, saveCachedPublicCourse } from '../src/offline-courses.js';
+import { emptyLibrary, exampleLibrary, updateEnglishCourse } from '../src/data.js';
 const output = document.querySelector('#results');
 const lines = [];
 const pending = [];
@@ -48,6 +49,22 @@ test('Last study scope resumes a populated class or deck and falls back to all',
 test('Mastery includes unseen cards', () => equal(getMastery([{confidence:5},{confidence:0}]),50));
 test('Local date key', () => equal(dateKey(new Date(2026,10,7,12)),'2026-11-07'));
 test('Yesterday maintains streak', () => equal(getStreak([{date:'2026-11-06',cards:1},{date:'2026-11-05',cards:2}],new Date(2026,10,7,12)),2));
+test('Inglese course update replaces the official set and preserves matching-card progress', () => {
+  const library=exampleLibrary(),course=library.classes.find(item=>item.title==='Inglese'),deck=course.decks[0],card=deck.cards[0];
+  card.confidence=4;card.reviewCount=8;card.dueAt='2026-11-10T10:00:00.000Z';card.reviewedAt='2026-11-07T10:00:00.000Z';card.starred=true;
+  const id=card.id;
+  deck.cards.push({...card,id:'outdated-card',question:'Outdated question',answer:'Outdated answer'});
+  deck.cards=deck.cards.filter(item=>item.question!=='Buona serata!');
+  equal(updateEnglishCourse(library),true);
+  const updated=course.decks[0],preserved=updated.cards.find(item=>item.question==='Salve!');
+  equal([course.decks.length,updated.cards.length,updated.cards.some(item=>item.question==='Outdated question'),updated.cards.some(item=>item.question==='Buona serata!'),preserved.id,preserved.confidence,preserved.reviewCount,preserved.starred],[31,8,false,true,id,4,8,true]);
+  equal(updateEnglishCourse(library),false);
+});
+test('Inglese course is added once to an account without it', () => {
+  const library=emptyLibrary();
+  equal(updateEnglishCourse(library),true);
+  equal([library.classes.filter(item=>item.title==='Inglese').length,library.classes[0].decks.length,updateEnglishCourse(library)],[1,31,false]);
+});
 test('Offline course refresh retains this device’s review progress', () => {
   const course = (answer, confidence) => ({ownerId:'owner',course:{id:'course',title:'Italian',description:'',color:'blue',icon:'globe',visibility:'public',createdAt:'2026-11-01T10:00:00.000Z',decks:[{id:'deck',title:'Greetings',createdAt:'2026-11-01T11:00:00.000Z',cards:[{id:'card',question:'Ciao?',answer,confidence,reviewCount:confidence,dueAt:null,reviewedAt:null,starred:confidence>0}]}]}});
   const cached = course('Old answer',4);

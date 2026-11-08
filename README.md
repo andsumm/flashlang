@@ -92,6 +92,8 @@ The Supabase JavaScript SDK is loaded only when cloud features are configured. E
 
 Each account's library is stored as one JSON document. Updates to that library are saved as a whole; simultaneous library edits from multiple devices use last-write-wins rather than collaborative merging. Public-course study progress is stored separately per user and per card, so studying a public course never changes its owner's content. Signed-in progress saved offline is queued on the device and synchronized when the connection returns. Browser storage is specific to a device and browser profile, so keep a JSON backup before clearing browser data or changing devices.
 
+On startup and sign-in, Flashlang updates the built-in **Inglese** course in the local or account library to the current official card set. Cards with unchanged questions keep their IDs and study progress; obsolete cards are removed, and new cards start with fresh progress. The updated account library is saved to Supabase during that sign-in.
+
 ## 🚀 Build and publish
 
 The app is published to GitHub Pages from this repository. Changes pushed to `main` are checked and deployed by the GitHub Actions workflow. To package and preview the public files locally:
